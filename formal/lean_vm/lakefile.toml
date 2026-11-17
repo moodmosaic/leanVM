@@ -159,6 +159,14 @@ name = "wire-diff"
 root = "WireDiff"
 srcDir = "cli"
 
+# The wire encoding's Lean and Rust drivers on generated proofs and mutations, a state machine
+# test in `IO` (cli/WireProperty.lean): run after `lake build wire-diff` and the cargo build of
+# scripts/wire-diff; not a default target.
+[[lean_exe]]
+name = "wire-property"
+root = "WireProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.
