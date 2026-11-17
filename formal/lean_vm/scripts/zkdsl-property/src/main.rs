@@ -4,6 +4,9 @@
 //!
 //!     exec T SOURCE p0c0 p0c1 p1c0 p1c1     parse, compile and execute
 //!     prove T SOURCE p0c0 p0c1 p1c0 p1c1    then prove and verify
+//!     export T SOURCE p0c0 p0c1 p1c0 p1c1 DIR   then also write `bytecode.bin`, `public_input.bin`
+//!                                           and `proof.wire` in DIR, as the verifiers' drivers
+//!                                           (`leanvm-verify`, `leanvm-rust-verify`) read them
 //!
 //! `T` is the prover tree, `s` (stable) or `x` (experimental); `SOURCE` a file; the last four words
 //! the two public-input words' limbs, decimal. The result is `ok` (after `prove`, followed by the
@@ -33,7 +36,7 @@ fn hex(bytes: &[u8]) -> String {
 /// One prover tree's `exec` and `prove`.
 macro_rules! tree {
     ($name:ident, $core:ident, $primitives:ident) => {
-        fn $name(prove: bool, program: &isa::Program, input: [u64; 4]) -> String {
+        fn $name(prove: bool, program: &isa::Program, input: [u64; 4], export: Option<&str>) -> String {
             use $core::cpu;
             use $primitives::field::F128;
             let public = [F128::new(input[0], input[1]), F128::new(input[2], input[3])];
@@ -47,6 +50,16 @@ macro_rules! tree {
                 Ok((proof, _)) => proof,
                 Err(error) => return format!("prove-error {error:?}").replace('\n', " "),
             };
+            if let Some(dir) = export {
+                let dir = std::path::Path::new(dir);
+                let table: Vec<u8> = program.stacked_bytecode().iter().flat_map(|w| w.to_le_bytes()).collect();
+                let written = std::fs::write(dir.join("bytecode.bin"), table)
+                    .and_then(|()| std::fs::write(dir.join("public_input.bin"), cpu::public_input_bytes(&public)))
+                    .and_then(|()| std::fs::write(dir.join("proof.wire"), proof.to_bytes()));
+                if let Err(error) = written {
+                    return format!("error {error}");
+                }
+            }
             match cpu::verify(program, &public, &proof) {
                 Ok(_) => format!("ok {}", hex(&keccak256::hash(&proof.to_bytes()))),
                 Err(error) => format!("verify-error {error:?}").replace('\n', " "),
@@ -59,12 +72,14 @@ tree!(stable, stable_lean_vm_core, stable_primitives);
 tree!(experimental, experimental_lean_vm_core, experimental_primitives);
 
 fn run(line: &[&str]) -> Result<String, String> {
-    let [op, tree, source, p0, p1, p2, p3] = line else {
-        return Err(format!("unknown command: {}", line.join(" ")));
+    let (op, tree, source, p0, p1, p2, p3, export) = match line {
+        [op, tree, source, p0, p1, p2, p3] => (op, tree, source, p0, p1, p2, p3, None),
+        [op, tree, source, p0, p1, p2, p3, dir] => (op, tree, source, p0, p1, p2, p3, Some(*dir)),
+        _ => return Err(format!("unknown command: {}", line.join(" "))),
     };
-    let prove = match *op {
-        "exec" => false,
-        "prove" => true,
+    let prove = match (*op, export) {
+        ("exec", None) => false,
+        ("prove", None) | ("export", Some(_)) => true,
         _ => return Err(format!("unknown command: {op}")),
     };
     let input = [word(p0)?, word(p1)?, word(p2)?, word(p3)?];
@@ -79,8 +94,8 @@ fn run(line: &[&str]) -> Result<String, String> {
         Err(payload) => return Ok(format!("compile-panic {}", message(payload))),
     };
     let outcome = catch_unwind(AssertUnwindSafe(|| match *tree {
-        "s" => Ok(stable(prove, &program, input)),
-        "x" => Ok(experimental(prove, &program, input)),
+        "s" => Ok(stable(prove, &program, input, export)),
+        "x" => Ok(experimental(prove, &program, input, export)),
         _ => Err(format!("no tree {tree}")),
     }));
     match outcome {

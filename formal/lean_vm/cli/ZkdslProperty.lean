@@ -15,6 +15,10 @@ with the Lean field (`Statement/Field.lean`), which the theorems are about. Then
 * refuse to execute it on any other public input, since a published word is an assertion;
 * prove it and verify the proof, in both trees, and the two proofs must be the same bytes.
 
+A fifth as many programs are also proved and given to the two verifiers, the statement's compiled
+(`lake exe leanvm-verify`) and the Rust (`scripts/rust-verifier-cli`): both must accept the proof,
+and on the proof, the public input or the bytecode altered they must give the same verdict.
+
 A program the compiler mistranslates, or constant arithmetic the compiler folds wrongly, or an
 instruction a prover executes wrongly, publishes other words than the Lean ones and fails the first;
 a published word that is not enforced fails the second. A failure is shrunk to a small program
@@ -22,7 +26,8 @@ a published word that is not enforced fails the second. A failure is shrunk to a
 
     cargo build --release --manifest-path scripts/zkdsl-property/Cargo.toml
     lake build zkdsl-property
-    lake exe zkdsl-property           # 100 programs
+    lake build leanvm-verify && cargo build --release --manifest-path scripts/rust-verifier-cli/Cargo.toml
+    lake exe zkdsl-property           # 100 programs; a fifth as many through the two verifiers
     lake exe zkdsl-property scripts/zkdsl-property/target/release/leanvm-zkdsl-property 20000
 -/
 
@@ -357,17 +362,87 @@ def refuses (rust : Driver) (dir : System.FilePath) : Property IO := propertyM d
       ensure (outcome.startsWith "execute-error" || outcome.startsWith "panic")
         "a statement that cannot hold was executed"
 
+/-! ## The two verifiers on the proofs of generated programs -/
+
+/-- Where a proof's files are altered, and to what. -/
+inductive File where
+  | wire
+  | publicInput
+  | bytecode
+  deriving Repr, BEq
+
+structure Alteration where
+  file : File
+  /-- A position, reduced modulo the file's length. -/
+  position : ℕ
+  byte : UInt8
+  deriving Repr
+
+/-- An alteration: mostly of the proof, near its start, where the scalars are, or anywhere. -/
+def genAlteration : Gen Alteration := do
+  let file ← Gen.frequency [(6, pure .wire), (1, pure .publicInput), (1, pure .bytecode)]
+  let position ← Gen.choice [Gen.nat (.linear 0 4000), Gen.nat (.exponential 0 (2 ^ 24))]
+  pure ⟨file, position, ← Gen.integral (.constant 0 255)⟩
+
+/-- The file's bytes altered. -/
+def alter (alterations : List Alteration) (file : File) (bytes : ByteArray) : ByteArray :=
+  alterations.foldl (fun bytes a ↦
+    if a.file == file && bytes.size ≠ 0 then bytes.set! (a.position % bytes.size) a.byte else bytes)
+    bytes
+
+/-- The Lean verifier's verdict on a wire proof's files (`lake exe leanvm-verify`). -/
+def leanAccepts (bytecode publicInput wire : String) : IO Bool := do
+  let out ← IO.Process.output
+    { cmd := ".lake/build/bin/leanvm-verify", args := #[bytecode, publicInput, wire] }
+  pure (out.exitCode == 0)
+
+/-- The proof of a generated program is accepted by the statement's verifier, compiled, and by the
+Rust one; and on the proof, the public input or the bytecode altered, the two give the same
+verdict. The Lean verifier is the one proved sound: a proof it refuses and the Rust accepts is what
+no theorem covers. -/
+def verifiers (rust verifier : Driver) (dir : System.FilePath) : Property IO := propertyM do
+  let program ← forAllWith (fun p ↦
+    s!"{p.source}\n# publishes {literal p.published.1}, {literal p.published.2}") genProgram
+  let alterations ← forAll (Gen.list (.linear 1 3) genAlteration)
+  pure do
+    let file (name : String) : String := (dir / name).toString
+    evalIO (IO.FS.writeFile (file "verified.py") program.source)
+    let (x, y) := program.published
+    let exported ← rust.ask (["export", "s", file "verified.py"] ++ limbs x ++ limbs y ++ [dir.toString])
+    ensure (exported.startsWith "ok ") s!"the stable prover: {exported}"
+    let honest := [file "bytecode.bin", file "public_input.bin", file "proof.wire"]
+    (← verifier.ask honest) === "accept"
+    ensure (← evalIO (leanAccepts (file "bytecode.bin") (file "public_input.bin") (file "proof.wire")))
+      "the Lean verifier refuses the Rust prover's proof"
+    for (name, target) in [("bytecode.bin", File.bytecode), ("public_input.bin", .publicInput),
+        ("proof.wire", .wire)] do
+      let bytes ← evalIO (IO.FS.readBinFile (file name))
+      evalIO (IO.FS.writeBinFile (file ("altered-" ++ name)) (alter alterations target bytes))
+    let altered := ["altered-bytecode.bin", "altered-public_input.bin", "altered-proof.wire"].map file
+    let rustVerdict ← verifier.ask altered
+    annotate s!"the Rust verifier, altered: {rustVerdict}"
+    let leanVerdict ← evalIO (leanAccepts (altered.getD 0 "") (altered.getD 1 "") (altered.getD 2 ""))
+    (rustVerdict == "accept") === leanVerdict
+
 end ZkdslProperty
 
 /-- The driver: the Rust binary's path may be given, and after it the number of programs. -/
 def main (args : List String) : IO UInt32 := do
   let path := args.head?.getD "scripts/zkdsl-property/target/release/leanvm-zkdsl-property"
   let rust ← ZkdslProperty.Driver.start path
+  let verifier ← do
+    let child ← IO.Process.spawn
+      { cmd := "scripts/rust-verifier-cli/target/release/leanvm-rust-verify", args := #["--batch"],
+        stdin := .piped, stdout := .piped, stderr := .inherit }
+    pure (⟨child.stdin, child.stdout⟩ : ZkdslProperty.Driver)
+  let count := (args[1]?.bind String.toNat?).getD 100
   let dir ← IO.FS.createTempDir
   let cases (p : Property IO) : Property IO := (args[1]?.bind String.toNat?).elim p p.withTests
   let ok ← checkGroup "the zkDSL compiler and the provers on generated programs"
     [("a program publishes what the Lean field computes",
       cases (ZkdslProperty.compiles rust dir)),
-     ("a statement that cannot hold is refused", cases (ZkdslProperty.refuses rust dir))]
+     ("a statement that cannot hold is refused", cases (ZkdslProperty.refuses rust dir)),
+     ("the Lean and the Rust verifier agree on its proof, altered or not",
+      (ZkdslProperty.verifiers rust verifier dir).withTests (count / 5 + 1))]
   IO.FS.removeDirAll dir
   return if ok then 0 else 1
