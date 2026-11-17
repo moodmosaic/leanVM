@@ -1,0 +1,26 @@
+# leanVM's zkDSL compiler and both provers on a line protocol, so that `lake exe zkdsl-property`
+# (cli/ZkdslProperty.lean) can compile, execute, prove and verify the programs it generates and set
+# the outcome beside what the Lean field arithmetic says the program computes.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-zkdsl-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+isa = { path = "../../../../crates/isa" }
+verifier = { path = "../../../../crates/verifier" }
+keccak256 = { path = "../../../../crates/keccak256" }
+zkdsl_compiler = { path = "../../../../crates/zkdsl_compiler" }
+stable_primitives = { path = "../../../../crates/stable_prover/primitives" }
+stable_lean_vm_core = { path = "../../../../crates/stable_prover/lean_vm_core" }
+experimental_primitives = { path = "../../../../crates/experimental_prover/primitives" }
+experimental_lean_vm_core = { path = "../../../../crates/experimental_prover/lean_vm_core" }
+
+[profile.release]
+codegen-units = 1

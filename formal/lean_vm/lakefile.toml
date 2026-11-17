@@ -175,6 +175,14 @@ name = "rust-property"
 root = "RustProperty"
 srcDir = "cli"
 
+# The zkDSL compiler and both provers on generated programs, their published words predicted with
+# the Lean field (cli/ZkdslProperty.lean): run after the cargo build of scripts/zkdsl-property; not
+# a default target.
+[[lean_exe]]
+name = "zkdsl-property"
+root = "ZkdslProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.
