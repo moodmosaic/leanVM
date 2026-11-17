@@ -1,0 +1,27 @@
+# The recursion guest (`guests/lean_ethereum.py`) on witnesses changed one hint at a time, so that
+# `lake exe guest-property` (cli/GuestProperty.lean) can ask which hints the guest leaves to the
+# prover. The honest witness is captured through the public `isa::Prover` interface, by a prover
+# that records what `aggregation::aggregate` hands it and then proves with the stable one.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-guest-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+isa = { path = "../../../../crates/isa" }
+verifier = { path = "../../../../crates/verifier" }
+aggregation = { path = "../../../../crates/aggregation" }
+lean_xmss = { path = "../../../../crates/lean_xmss" }
+lean_sphincs = { path = "../../../../crates/lean_sphincs" }
+lean_da = { path = "../../../../crates/lean_da" }
+stable_primitives = { path = "../../../../crates/stable_prover/primitives" }
+stable_lean_vm_core = { path = "../../../../crates/stable_prover/lean_vm_core" }
+
+[profile.release]
+codegen-units = 1

@@ -207,6 +207,14 @@ name = "agg-property"
 root = "AggProperty"
 srcDir = "cli"
 
+# The recursion guest on honest witnesses with one hint word changed, which it must refuse or never
+# read (cli/GuestProperty.lean): run after the cargo build of scripts/guest-property; not a default
+# target.
+[[lean_exe]]
+name = "guest-property"
+root = "GuestProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.

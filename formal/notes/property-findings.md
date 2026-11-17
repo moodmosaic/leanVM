@@ -12,6 +12,7 @@ Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 | `lake exe scheme-property` | `scripts/scheme-property` | leanSPHINCS and leanXMSS, the Rust against the statement's, and the leanXMSS signer's cache |
 | `lake exe da-property` | `scripts/da-property` | LeanDA's codewords, commitments and cell openings against the statement's |
 | `lake exe agg-property` | `scripts/agg-property` | the aggregation through the public API: which claims a proof verifies for, bad children, altered signatures |
+| `lake exe guest-property` | `scripts/guest-property` | the recursion guest on honest witnesses with one hint word changed |
 
 To build and run one, from `formal/lean_vm` (lean-hedgehog beside leanVM, see `lakefile.toml`):
 
@@ -56,9 +57,31 @@ finding below gives the check to run and the input to expect, not a seed.
 - **Worth doing**: say the precondition in the doc comment, or make the two trees agree. Low
   priority.
 
+## 2. Hint words the guest never reads, and a flag read only as zero or not (no bug found)
+
+- **Where**: `guests/lean_ethereum.py`, the hints of a node with children.
+- **What**: with one word of one hint changed, the guest refuses, except in words it never reads,
+  where it accepts any value: the tail of `stream` past a child's proof; the half of each
+  `merkle_children` pair on the path's own side (`walk_window` hashes the running node with the
+  other half); the `merkle_caps` nodes under a node `merkle_cap_active` leaves inactive, and node
+  0's two words; flags 0 and 1 of `merkle_cap_active`; and the pull side's slots of
+  `block_group_order` ("pull's slots go unread"). And an active cap node's flag may be any nonzero
+  `K` word, since it is only compared with zero.
+- **See it**: `lake exe guest-property`; `cli/GuestProperty.lean` states each of these as the rule
+  it checks in place of refusal, so the run passes, and any other accepted word fails it. By hand,
+  after `capture parent`, `flip 17 0 2 1` (a flag from 1 to 3) answers `accepted` and `flip 17 0 2 0`
+  (to 0) `refused`; the stream numbers are the order `capture` prints.
+- **Is it a bug?** Not that reading shows. An unread word constrains nothing because nothing
+  depends on it, and a nonzero flag is the same witness written otherwise: a proof exists for the
+  same claims either way. In the signature and blob nodes no changed word is accepted at all
+  (4,000 changes of each kind, and before that every word of the leanSPHINCS and leanXMSS nodes'
+  hints, fourteen changes each). One word at a time does not find two hints that are free only
+  together, and a run `cpu::execute` refuses is not thereby one no trace exists for.
+- **Worth doing**: nothing required. Pinning the flag to 1 would make the witness canonical.
+
 ## What agreed, and at how many cases
 
-No disagreement but the one above, at these counts (2026-11-17, x86-64 with AVX-512):
+No disagreement but the first finding's, at these counts (2026-11-17, x86-64 with AVX-512):
 
 | check | cases |
 | --- | --- |
@@ -73,10 +96,12 @@ No disagreement but the one above, at these counts (2026-11-17, x86-64 with AVX-
 | zkDSL programs: published words, refusal of another input, same proof in both trees | 10,000 programs |
 | zkDSL programs with a statement that cannot hold | 10,000 programs |
 | the Lean and the Rust verifier on generated programs' proofs, altered or not | 301 proofs |
-| aggregation: own claims and no others, bytes, bad children, forged signatures | 150 sequences |
+| aggregation: own claims and no others, bytes, tampering, bad children, forged signatures | 300 sequences |
+| a signature, message or key with one byte changed, given to `aggregate` | 300 |
+| the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
-`keccak_gkr` except through whole proofs, `OutputClaims::Only`, hints and a few zkDSL constructs
-(`StackBuf` parameters and returns, recursion, `keccak_cells` with `state=` and `final=`,
-`keccak` with `cap=` and `pad_tail=`), and a guest given a witness no honest prover builds: the
-drivers reach the guest only through `aggregate`, whose hints come from the crates' own code.
+`keccak_gkr` except through whole proofs, `OutputClaims::Only`, zkDSL hints and a few constructs
+(`StackBuf` parameters and returns, recursion, `keccak_cells` with `state=` and `final=`, `keccak`
+with `cap=` and `pad_tail=`), witnesses changed in more than one word, and a prover that does not
+run `cpu::execute` at all.
