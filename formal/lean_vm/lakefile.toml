@@ -199,6 +199,14 @@ name = "da-property"
 root = "DaProperty"
 srcDir = "cli"
 
+# Trees of aggregated signatures and blobs through leanVM's public API, and which claims each proof
+# verifies for, a state machine test in `IO` (cli/AggProperty.lean): run after the cargo build of
+# scripts/agg-property; not a default target.
+[[lean_exe]]
+name = "agg-property"
+root = "AggProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.

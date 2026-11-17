@@ -1,0 +1,19 @@
+# leanVM's public API (`crates/lean_vm`: `aggregate`, `AggregateProof::verify`) on a line protocol,
+# so that `lake exe agg-property` (cli/AggProperty.lean) can build trees of aggregated signatures and
+# blobs and ask which claims each proof verifies for.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-agg-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+lean_vm = { path = "../../../../crates/lean_vm" }
+
+[profile.release]
+codegen-units = 1
