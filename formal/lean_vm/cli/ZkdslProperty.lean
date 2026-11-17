@@ -150,7 +150,7 @@ def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
   let v := s!"v{s.fresh}"
   let (a, x) ← genOperand s
   let (b, y) ← genOperand s
-  let kind ← Gen.nat (.constant 0 17)
+  let kind ← Gen.nat (.constant 0 28)
   match kind with
   | 0 => do
     let n ← genLiteral
@@ -260,11 +260,110 @@ def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
     let lines := s.lines ++ #[s!"    {run} = StackBuf(3)", s!"    {run}[0] = {a}",
       s!"    {run}[1] = {b}", s!"    {run}[2] = {run}[0] * {run}[1] + {run}[0]"]
     pure ({ s with lines }.bind s!"    {v} = {run}[2]" (x * y + x) true)
-  | _ =>
+  | 17 =>
     -- Two `K` words packed into one, their membership asserted.
     if x.limb 1 ≠ 0 ∨ y.limb 1 ≠ 0 then pure (s.bind s!"    {v} = {a} * {b}" (x * y) false)
     else pure (s.bind s!"    {v} = pack64x2(same({a}), same({b}))"
       (E.ofLimbs (x.limb 0) (y.limb 0)) true)
+  | 18 => do
+    -- A function of two results.
+    let s := s.bind s!"    {v}, v{s.fresh + 1} = two({a}, {b})" (x + y) true
+    pure { s with fresh := s.fresh + 1, names := s.names.push (s!"v{s.fresh}", x * y, true) }
+  | 19 => do
+    -- A chain of three branches.
+    let (c, z) ← genOperand s
+    let (d, w) ← genOperand s
+    if (x + y).limb 1 ≠ 0 ∨ (z + w).limb 1 ≠ 0 then
+      pure (s.bind s!"    {v} = {a} * {b}" (x * y) false)
+    else
+      let taken := if x == y then x else if z != w then z else w
+      let cell := s!"r[GEN ** {s.cells}]"
+      let lines := s.lines ++ #[s!"    if same({a}) == same({b}):", s!"        {cell} = {a}",
+        s!"    elif same({c}) != same({d}):", s!"        {cell} = {c}", "    else:",
+        s!"        {cell} = {d}"]
+      pure ({ s with lines, cells := s.cells + 1 }.bind s!"    {v} = {cell}" taken true)
+  | 20 => do
+    -- A runtime loop whose bound is a runtime power, its log bounded first.
+    let count ← Gen.nat (.constant 0 5)
+    let value := (List.range count).foldl (fun acc _ ↦ acc * x + y) x
+    let (h, n, i) := (s!"h{s.fresh}", s!"n{s.fresh}", s!"i{s.fresh}")
+    let lines := s.lines ++ #[s!"    {n} = same(GEN ** {count})", s!"    assert log({n}) < 16",
+      s!"    {h} = HeapBuf({count + 1})", s!"    {h}[1] = {a}",
+      s!"    for {i} in mul_range(1, {n}):", s!"        {h}[{i} * GEN] = {h}[{i}] * {a} + {b}"]
+    pure ({ s with lines }.bind s!"    {v} = {h}[GEN ** {count}]" value true)
+  | 21 => do
+    -- A runtime loop left early: the cell after the last one written is still free.
+    let count ← Gen.nat (.constant 1 5)
+    let stop ← Gen.nat (.constant 0 count)
+    let (c, z) ← genOperand s
+    let value (k : ℕ) := (List.range k).foldl (fun acc _ ↦ acc * x + y) x
+    let (h, i) := (s!"h{s.fresh}", s!"i{s.fresh}")
+    let free := if stop < count ∧ value (stop + 1) ≠ z then
+      #[s!"    {h}[GEN ** {stop + 1}] = {c}"] else #[]
+    let lines := s.lines ++ #[s!"    {h} = HeapBuf({count + 2})", s!"    {h}[1] = {a}",
+      s!"    for {i} in mul_range(1, GEN ** {count}):", s!"        if {i} == GEN ** {stop}:",
+      "            return", s!"        {h}[{i} * GEN] = {h}[{i}] * {a} + {b}"] ++ free
+    pure ({ s with lines }.bind s!"    {v} = {h}[GEN ** {stop}]" (value stop) true)
+  | 22 => do
+    -- Compound assignment, in an unrolled loop.
+    let count ← Gen.nat (.constant 0 3)
+    let value := (List.range count).foldl (fun acc _ ↦ (acc + y) * x) x
+    let s := s.bind s!"    {v} = same({a})" value true
+    pure { s with lines := s.lines ++ #[s!"    for i{s.fresh} in unroll(0, {count}):",
+      s!"        {v} += {b}", s!"        {v} *= {a}"] }
+  | 23 => do
+    -- A global constant and an element of a constant array, as values.
+    let index ← Gen.nat (.constant 0 2)
+    pure (s.bind s!"    {v} = same({a}) * TABLE[{index}] + SIZE"
+      (x * word ([5, 7, 2 ^ 64 + 11].getD index 0) + word 3) true)
+  | 24 => do
+    -- Integer arithmetic asked for in a value position.
+    let m ← Gen.nat (.constant 0 9)
+    let n ← Gen.nat (.constant 0 9)
+    pure (s.bind s!"    {v} = same({a}) + const({m} * {n} + {m})" (x + word (m * n + m)) true)
+  | 25 => do
+    -- A hash of heap slices.
+    let (c, z) ← genOperand s
+    let (d, w) ← genOperand s
+    let (d0, d1) := digestCells [x, y, z, w] 64
+    let (h, k) := (s!"h{s.fresh}", s!"k{s.fresh}")
+    let lines := s.lines ++ #[s!"    {h} = HeapBuf(4)", s!"    {h}[1] = {a}", s!"    {h}[GEN] = {b}",
+      s!"    {h}[GEN ** 2] = {c}", s!"    {h}[GEN ** 3] = {d}", s!"    {k} = StackBuf(2)",
+      s!"    keccak({h}[0:2], {h}[2:4], {k})"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 26 => do
+    -- A hash of two slices of a stack run into a third.
+    let (c, z) ← genOperand s
+    let (d, w) ← genOperand s
+    let (d0, d1) := digestCells [x, y, z, w] 64
+    let t := s!"t{s.fresh}"
+    let lines := s.lines ++ #[s!"    {t} = StackBuf(6)", s!"    {t}[0] = {a}", s!"    {t}[1] = {b}",
+      s!"    {t}[2] = {c}", s!"    {t}[3] = {d}", s!"    keccak({t}[0:2], {t}[2:4], {t}[4:6])"]
+    let s := { s with lines }.bind s!"    {v} = {t}[4]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {t}[5]" d1 true)
+  | 27 => do
+    -- A hash of 128 bytes: four words and a tail of four cells.
+    let words ← Gen.list (.singleton 6) (genOperand s)
+    let cells := [(a, x), (b, y)] ++ words
+    let (d0, d1) := digestCells (cells.map (·.2)) 128
+    let name (i : ℕ) := (cells.getD i ("0", 0)).1
+    let (t, k) := (s!"t{s.fresh}", s!"k{s.fresh}")
+    let lines := s.lines ++ #[s!"    {t} = StackBuf(4)", s!"    {t}[0] = {name 4}",
+      s!"    {t}[1] = {name 5}", s!"    {t}[2] = {name 6}", s!"    {t}[3] = {name 7}",
+      s!"    {k} = StackBuf(2)",
+      s!"    keccak([{name 0}, {name 1}], [{name 2}, {name 3}], {k}, tail={t}[0:4])"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | _ => do
+    -- `keccak_cells` of words named in a list, read where they lie.
+    let words ← Gen.list (.linear 1 12) (genOperand s)
+    let (d0, d1) := digestCells (words.map (·.2)) (16 * words.length)
+    let k := s!"k{s.fresh}"
+    let lines := s.lines ++ #[s!"    {k} = StackBuf(2)",
+      s!"    keccak_cells([{", ".intercalate (words.map (·.1))}], {k})"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
 
 /-- A statement that cannot hold, which an execution must refuse. -/
 def genFalse (s : Scope) : Gen (Array String) := do
@@ -311,7 +410,8 @@ def genProgramThat (refused : Bool) : Gen Program := do
   let functions (prefix_ : String) (decorator : List String) (bodies : List Body) :=
     bodies.zipIdx.flatMap fun (body, i) ↦
       decorator ++ [s!"def {prefix_}{i}(a, b):", s!"    return {body.text}", ""]
-  let lines := ["from snark_lib import *", "", "def same(a):", "    return a", "",
+  let lines := ["from snark_lib import *", "", "SIZE = 3", "TABLE = [5, 7, 18446744073709551627]",
+      "", "def same(a):", "    return a", "", "def two(a, b):", "    return a + b, a * b", "",
       "def pick(a, k: Const):", "    return a * k + k", "",
       "@inline", "def pack64x2(a, b):", "    assert_in_k(a, b)",
       "    return a + 18446744073709551616 * b", ""]
