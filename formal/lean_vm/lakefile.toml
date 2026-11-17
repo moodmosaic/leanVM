@@ -167,6 +167,14 @@ name = "wire-property"
 root = "WireProperty"
 srcDir = "cli"
 
+# The Rust primitives (the fields, Keccak, the streamed hasher, the prover's sponge) against the Lean
+# definitions on generated inputs (cli/RustProperty.lean): run after the cargo build of
+# scripts/rust-property; not a default target.
+[[lean_exe]]
+name = "rust-property"
+root = "RustProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.
