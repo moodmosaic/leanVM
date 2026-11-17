@@ -11,6 +11,7 @@ Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 | `lake exe zkdsl-property` | `scripts/zkdsl-property`, `scripts/rust-verifier-cli` | the zkDSL compiler and both provers on generated programs; the Lean and the Rust verifier on their proofs |
 | `lake exe scheme-property` | `scripts/scheme-property` | leanSPHINCS and leanXMSS, the Rust against the statement's, and the leanXMSS signer's cache |
 | `lake exe da-property` | `scripts/da-property` | LeanDA's codewords, commitments and cell openings against the statement's |
+| `lake exe agg-property` | `scripts/agg-property` | the aggregation through the public API: which claims a proof verifies for, bad children, altered signatures |
 
 To build and run one, from `formal/lean_vm` (lean-hedgehog beside leanVM, see `lakefile.toml`):
 
@@ -69,12 +70,13 @@ No disagreement but the one above, at these counts (2026-11-17, x86-64 with AVX-
 | leanSPHINCS: signs what verifies; verdicts on altered inputs | 300 each |
 | leanXMSS: verdicts on altered inputs; the signer over 12 bottom trees | 300; 31 sequences |
 | LeanDA: codewords, commitments, openings altered or not | 20; 6; 20 |
-| zkDSL programs: published words, refusal of another input, same proof in both trees | see the driver |
-| zkDSL programs with a statement that cannot hold | see the driver |
-| the Lean and the Rust verifier on generated programs' proofs, altered or not | see the driver |
+| zkDSL programs: published words, refusal of another input, same proof in both trees | 10,000 programs |
+| zkDSL programs with a statement that cannot hold | 10,000 programs |
+| the Lean and the Rust verifier on generated programs' proofs, altered or not | 301 proofs |
+| aggregation: own claims and no others, bytes, bad children, forged signatures | 150 sequences |
 
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
-`keccak_gkr` except through whole proofs, the aggregation and its guest, hints and several zkDSL
-constructs (`Const` parameters beyond `match` arms, slices, heap `keccak`, tuple returns, early
-returns, runtime loop bounds).
-
+`keccak_gkr` except through whole proofs, `OutputClaims::Only`, hints and a few zkDSL constructs
+(`StackBuf` parameters and returns, recursion, `keccak_cells` with `state=` and `final=`,
+`keccak` with `cap=` and `pad_tail=`), and a guest given a witness no honest prover builds: the
+drivers reach the guest only through `aggregate`, whose hints come from the crates' own code.
