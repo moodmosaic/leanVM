@@ -86,6 +86,16 @@ def genChange : Gen Change :=
     .set <$> Gen.element [0, 1, 2] <*> Gen.element [0, 1],
     .set <$> Gen.nat (.exponential 0 (2 ^ 64 - 1)) <*> Gen.nat (.exponential 0 (2 ^ 64 - 1))]
 
+/-- A replacement of a word, the only kind `change2` carries. -/
+def genSet : Gen Change := .set <$> Gen.element [0, 1, 2] <*> Gen.element [0, 1]
+
+/-- The verdict on one word changed: `same` counts as not a change. -/
+def verdict (rust : Driver) (stream entry word : Nat) (change : Change) : TestT IO String := do
+  let position := [toString stream, toString entry, toString word]
+  evalIO <| rust.send <| match change with
+    | .flip bit => ["flip"] ++ position ++ [toString bit]
+    | .set c0 c1 => ["change"] ++ position ++ [toString c0, toString c1]
+
 /-- Whether the guest accepts the witness with one word changed (`same` counts as refused: nothing
 was changed, and so does a word past the entry's end). -/
 def accepts (rust : Driver) (stream entry word : Nat) (change : Change) : TestT IO Bool := do
@@ -126,6 +136,51 @@ def hints (rust : Driver) (streams : List Stream) : Property IO := propertyM do
       | "block_group_order" => ensure (9 ≤ word && word ≤ 17) "a group's rank is free"
       | _ => failWith "the guest accepts a changed hint"
 
+/-- Two words of two hints changed at once: the guest accepts the pair only if each word alone is
+free. A pair accepted while one word alone is refused would be a tampering check a second change
+bypasses; a pair refused while both words alone are free is a pair constrained only together, which
+is sound and worth recording, not a failure. -/
+def twoWords (rust : Driver) (streams : List Stream) : Property IO := propertyM do
+  let i1 ← forAll (Gen.nat (.constant 0 (streams.length - 1)))
+  let i2 ← forAll (Gen.nat (.constant 0 (streams.length - 1)))
+  let s1 := streams.getD i1 ⟨"", 1, 1⟩
+  let s2 := streams.getD i2 ⟨"", 1, 1⟩
+  let e1 ← forAll (Gen.nat (.constant 0 (s1.entries - 1)))
+  let e2 ← forAll (Gen.nat (.constant 0 (s2.entries - 1)))
+  let w1 ← forAll (Gen.nat (.constant 0 (s1.words - 1)))
+  let w2 ← forAll (Gen.nat (.constant 0 (s2.words - 1)))
+  let c1 ← forAll genSet
+  let c2 ← forAll genSet
+  pure do
+    annotate s!"stream {s1.name} and {s2.name}"
+    let pair := match c1 with
+      | .set c0 c1 => match c2 with
+        | .set d0 d1 =>
+          ["change2"] ++ [toString i1, toString e1, toString w1, toString i2, toString e2, toString w2]
+            ++ [toString c0, toString c1, toString d0, toString d1]
+        | .flip _ => [""]
+      | .flip _ => [""]
+    let answer ← evalIO (rust.send pair)
+    -- Entries of a stream differ in length: a word past an entry's end is no change.
+    if answer == "error no such word" || answer == "error no such entry" || answer == "error no such stream" then pure ()
+    else if answer.startsWith "error" || answer.startsWith "panic" then failWith answer
+    else if answer == "same" then pure ()
+    else if answer == "accepted" then
+      -- A pair accepted is sound only if each word alone is free; a word refused alone that a
+      -- second change frees would be a tampering check a second change bypasses.
+      let v1 ← verdict rust i1 e1 w1 c1
+      let v2 ← verdict rust i2 e2 w2 c2
+      if v1 == "same" || v2 == "same" then
+        -- One word was not changed: the pair is a one-word change, covered elsewhere.
+        pure ()
+      else
+        ensure (!v1.startsWith "refused") "a word refused alone is freed by a second change"
+        ensure (!v2.startsWith "refused") "a word refused alone is freed by a second change"
+    else
+      -- Refused. A pair refused while both words alone are free is two hints constrained
+      -- together: sound, and worth recording, not a failure.
+      pure ()
+
 end GuestProperty
 
 /-- The driver: the Rust binary's path may be given, and after it the number of changes for each
@@ -144,5 +199,7 @@ def main (args : List String) : IO UInt32 := do
     else
       ok := (← checkGroup s!"the guest on a changed witness: {kind}"
         [(s!"a changed hint is refused, of {streams.length} streams",
-          (GuestProperty.hints rust streams).withTests count)]) && ok
+          (GuestProperty.hints rust streams).withTests count),
+         (s!"two words changed together, of {streams.length} streams",
+          (GuestProperty.twoWords rust streams).withTests count)]) && ok
   return if ok then 0 else 1

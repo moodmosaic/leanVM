@@ -166,6 +166,27 @@ fn run(line: &[&str]) -> Result<String, String> {
             *slot = value;
             guest(&witness, *public_input, *op == "prove")
         }
+        ["change2", s1, e1, w1, s2, e2, w2, c0, c1, c2, c3] => {
+            // Two words of two hints changed at once: the guest's verdict on the pair.
+            let captured = CAPTURED.lock().unwrap();
+            let (witness, public_input) = captured.as_ref().ok_or("nothing captured")?;
+            let mut witness = witness.clone();
+            let mut set = |s: &str, e: &str, w: &str, c0: &str, c1: &str| -> Result<bool, String> {
+                let entries = &mut witness.get_mut(number(s)?).ok_or("no such stream")?.1;
+                let entry = entries.get_mut(number(e)?).ok_or("no such entry")?;
+                let slot = entry.get_mut(number(w)?).ok_or("no such word")?;
+                let value = E::new(c0.parse().map_err(|_| "not a limb")?, c1.parse().map_err(|_| "not a limb")?);
+                let same = *slot == value;
+                *slot = value;
+                Ok(same)
+            };
+            let same1 = set(s1, e1, w1, c0, c1)?;
+            let same2 = set(s2, e2, w2, c2, c3)?;
+            if same1 && same2 {
+                return Ok("same".into());
+            }
+            guest(&witness, *public_input, false)
+        }
         ["flip", stream, entry, word, bit] => {
             let captured = CAPTURED.lock().unwrap();
             let (witness, public_input) = captured.as_ref().ok_or("nothing captured")?;

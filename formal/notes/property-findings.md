@@ -59,6 +59,24 @@ finding below gives the check to run and the input to expect, not a seed.
 
 ## 2. Hint words the guest never reads, and a flag read only as zero or not (no bug found)
 
+### 2b. Two words changed at once (no bug found)
+
+- **Where**: the recursion guest (`guests/lean_ethereum.py`), hints of a node with children.
+- **What**: changing two words of two hints at once, the guest accepts the pair only when each word
+alone is free; a read word stays read, and two free words stay free. `cli/GuestProperty.lean` now
+runs a `two words changed together` check (a `change2` line in `scripts/guest-property`, two words
+set at once): a pair the guest accepts while one word alone is refused would be a tampering check a
+second change bypasses, and that never happened (read words stay read, whatever the other change).
+The honest witness's free words are independent, not constrained only together.
+- **See it**: `lake exe guest-property`; the new check runs beside the one-word one, 1000 cases a
+kind and passing. By hand, `capture parent`, then `change2 0 0 0 16 1 0 1 0 0 1` (a no-op `meta`
+word plus a free `merkle_caps` word) answers `accepted`, and `change2 15 0 0 15 0 2 1 0 1 0` (a read
+`merkle_children` word plus a free one) `refused`.
+- **Is it a bug?** No. The guest's refusal is per-word and not bypassed by a second change, and two
+free words together stay free (no pair constrained only together was found). A free word is the
+same witness written otherwise, and a proof exists for the same claims either way.
+- **Worth doing**: nothing required.
+
 - **Where**: `guests/lean_ethereum.py`, the hints of a node with children.
 - **What**: with one word of one hint changed, the guest refuses, except in words it never reads,
   where it accepts any value: the tail of `stream` past a child's proof; the half of each
@@ -103,5 +121,6 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
 `keccak_gkr` except through whole proofs, `OutputClaims::Only`, zkDSL hints and a few constructs
 (`StackBuf` parameters and returns, recursion, `keccak_cells` with `state=` and `final=`, `keccak`
-with `cap=` and `pad_tail=`), witnesses changed in more than one word, and a prover that does not
-run `cpu::execute` at all.
+with `cap=` and `pad_tail=`), and a prover that does not run `cpu::execute` at all. Witnesses
+changed in more than one word are now covered: `cli/GuestProperty.lean` runs a two-word check
+(2b above), and `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly`.
