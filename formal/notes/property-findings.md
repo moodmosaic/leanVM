@@ -113,15 +113,21 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | LeanDA: codewords, commitments, openings altered or not | 20; 6; 20 |
 | zkDSL programs: published words, refusal of another input, same proof in both trees | 10,000 programs |
 | zkDSL programs with a statement that cannot hold | 10,000 programs |
+| zkDSL programs with the later kinds: multi-block `keccak_cells`, `cap=`, `pad_tail=`, `StackBuf` calls, hints, recursion | 400 programs |
 | the Lean and the Rust verifier on generated programs' proofs, altered or not | 301 proofs |
 | aggregation: own claims and no others, bytes, tampering, bad children, forged signatures | 300 sequences |
+| aggregation asked to prove only part of its claims (`OutputClaims::Only`) | 500 sequences |
 | a signature, message or key with one byte changed, given to `aggregate` | 300 |
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
 `keccak_gkr` except through whole proofs, and a prover that does not run `cpu::execute` at all.
-`OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly`, witnesses changed in
+`OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
+model was wrong in three places, each caught by a failing run and fixed), witnesses changed in
 more than one word by `cli/GuestProperty.lean`'s two-word check (2b above), and the zkDSL
 constructs the generator once lacked (hints with witness streams, `StackBuf` parameters and
 returns, recursion, `keccak_cells` with `state=` and `final=0`, `keccak` with `cap=` and
 `pad_tail=`) are now kinds 29..34 of `cli/ZkdslProperty.lean`, run by `lake exe zkdsl-property`.
+The harness's `exec`, `prove` and `export` lines take the prover's witness stream beside the
+public input: a name, an entry's length and its limbs, the groups in pop order, a name's groups
+its successive entries; a hinted value the program pins and the prover gives wrongly is refused.
