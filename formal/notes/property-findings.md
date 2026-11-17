@@ -150,6 +150,7 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | aggregation asked to prove only part of its claims (`OutputClaims::Only`) | 500 sequences |
 | a signature, message or key with one byte changed, given to `aggregate` | 300 |
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
+| the guest on two words changed at once, five kinds of node | 1,000 each |
 
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), a direct
 differential of `pcs`/`keccak_gkr` at unusual depths and batches, and a prover that does not run
