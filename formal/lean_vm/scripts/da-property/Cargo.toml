@@ -1,0 +1,19 @@
+# LeanDA (`crates/lean_da`) on a line protocol, so that `lake exe da-property`
+# (cli/DaProperty.lean) can check its codewords, commitments and cell openings against the
+# statement's (`Statement/LeanDa.lean`) on generated blobs.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-da-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+lean_da = { path = "../../../../crates/lean_da" }
+
+[profile.release]
+codegen-units = 1

@@ -191,6 +191,14 @@ name = "scheme-property"
 root = "SchemeProperty"
 srcDir = "cli"
 
+# LeanDA's codewords, commitments and cell openings, the Rust against the statement's, on generated
+# blobs (cli/DaProperty.lean): run after the cargo build of scripts/da-property; not a default
+# target.
+[[lean_exe]]
+name = "da-property"
+root = "DaProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.
