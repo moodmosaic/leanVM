@@ -26,7 +26,7 @@ a published word that is not enforced fails the second. A failure is shrunk to a
     lake exe zkdsl-property scripts/zkdsl-property/target/release/leanvm-zkdsl-property 20000
 -/
 
-open Hedgehog LeanVM.Parameters
+open Hedgehog LeanVM.Parameters LeanVM.Protocol LeanVM.Protocol.KeccakHash
 
 namespace ZkdslProperty
 
@@ -64,6 +64,16 @@ def limbs (x : E) : List String := [toString (x.limb 0).lane.toNat, toString (x.
 /-- `x ^ n` by squaring. -/
 def power (x : E) (n : ℕ) : E :=
   (List.range n.size).foldr (fun i acc ↦ if n.testBit i then acc * acc * x else acc * acc) 1
+
+/-- The two cells of the Keccak-256 digest of some cells' first `length` bytes: a cell is two
+lanes, sixteen bytes. -/
+def digestCells (cells : List E) (length : ℕ) : E × E :=
+  let digest := keccak256 ((cells.flatMap E.toBytes).take length)
+  (E.ofLimbs (K.ofLane digest[0]) (K.ofLane digest[1]),
+    E.ofLimbs (K.ofLane digest[2]) (K.ofLane digest[3]))
+
+/-- The address of index `i`, `g^i`, as a word. -/
+def address (i : ℕ) : E := power (ofK g) i
 
 /-! ## Helper functions: an expression of two parameters -/
 
@@ -135,7 +145,7 @@ def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
   let v := s!"v{s.fresh}"
   let (a, x) ← genOperand s
   let (b, y) ← genOperand s
-  let kind ← Gen.nat (.constant 0 11)
+  let kind ← Gen.nat (.constant 0 17)
   match kind with
   | 0 => do
     let n ← genLiteral
@@ -190,9 +200,88 @@ def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
     -- An assertion that holds, of the kind the two words allow.
     let test := if x == y then "==" else "!="
     pure { s with lines := s.lines.push s!"    assert same({a}) {test} same({b})" }
-  | _ => do
+  | 11 => do
     let exponent ← Gen.nat (.constant 0 6)
     pure (s.bind s!"    {v} = same({a}) ** {exponent}" (power x exponent) true)
+  | 12 => do
+    -- One `KECCAK`: the hash of four cells' first 64, 48, 32 or 16 bytes; a cell past them is `0`.
+    let (c, z) ← genOperand s
+    let (d, w) ← genOperand s
+    let kept ← Gen.nat (.constant 1 4)
+    let words := (List.zip [a, b, c, d] [x, y, z, w]).zipIdx.map fun ((name, value), i) ↦
+      if i < kept then (name, value) else ("0", 0)
+    let name (i : ℕ) := (words.getD i ("0", 0)).1
+    let (d0, d1) := digestCells (words.map (·.2)) (16 * kept)
+    let k := s!"k{s.fresh}"
+    let length := if kept = 4 then "" else s!", len={16 * kept}"
+    let lines := s.lines ++ #[s!"    {k} = StackBuf(2)",
+      s!"    keccak([{name 0}, {name 1}], [{name 2}, {name 3}], {k}{length})"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 13 => do
+    -- `keccak_cells`: the hash of a run of cells, of several blocks, ending anywhere in its last
+    -- cell, whose bytes after the end are zero.
+    let count ← Gen.nat (.linear 1 20)
+    let last ← Gen.nat (.constant 1 16)
+    let cells ← Gen.list (.singleton count) (genOperand s)
+    let tail ← Gen.nat (.exponential 0 (2 ^ (8 * last) - 1))
+    let cells := if last = 16 then cells else cells.take (count - 1) ++ [(toString tail, word tail)]
+    let length := 16 * (count - 1) + last
+    let (d0, d1) := digestCells (cells.map (·.2)) length
+    let (run, k) := (s!"s{s.fresh}", s!"k{s.fresh}")
+    let lines := s.lines ++ #[s!"    {run} = StackBuf({count})"]
+      ++ (cells.zipIdx.map fun ((name, _), i) ↦ s!"    {run}[{i}] = {name}").toArray
+      ++ #[s!"    {k} = StackBuf(2)",
+        s!"    keccak_cells({run}, {k}{if last = 16 then "" else s!", len={length}"})"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 14 => do
+    -- A range check in the exponent, of a power below its bound.
+    let bound ← Gen.nat (.linear 1 40)
+    let exponent ← Gen.nat (.constant 0 (bound - 1))
+    let s := s.bind s!"    {v} = same(GEN ** {exponent})" (address exponent) true
+    pure { s with lines := s.lines.push s!"    assert log({v}) < {bound}" }
+  | 15 => do
+    -- A dispatch on the log of a power: arm `j` is `pick(a, j)`.
+    let arms ← Gen.nat (.constant 1 6)
+    let taken ← Gen.nat (.constant 0 (arms - 1))
+    let m := s!"m{s.fresh}"
+    let lines := s.lines.push s!"    {m} = same(GEN ** {taken})"
+    pure ({ s with lines }.bind
+      s!"    {v} = match(log({m}), range(0, {arms}), lambda j: pick({a}, j))"
+      (x * word taken + word taken) true)
+  | 16 => do
+    let run := s!"s{s.fresh}"
+    let lines := s.lines ++ #[s!"    {run} = StackBuf(3)", s!"    {run}[0] = {a}",
+      s!"    {run}[1] = {b}", s!"    {run}[2] = {run}[0] * {run}[1] + {run}[0]"]
+    pure ({ s with lines }.bind s!"    {v} = {run}[2]" (x * y + x) true)
+  | _ =>
+    -- Two `K` words packed into one, their membership asserted.
+    if x.limb 1 ≠ 0 ∨ y.limb 1 ≠ 0 then pure (s.bind s!"    {v} = {a} * {b}" (x * y) false)
+    else pure (s.bind s!"    {v} = pack64x2(same({a}), same({b}))"
+      (E.ofLimbs (x.limb 0) (y.limb 0)) true)
+
+/-- A statement that cannot hold, which an execution must refuse. -/
+def genFalse (s : Scope) : Gen (Array String) := do
+  let (a, x) ← genOperand s
+  let (b, y) ← genOperand s
+  let kind ← Gen.nat (.constant 0 3)
+  let test := if x == y then "!=" else "=="
+  match kind with
+  | 0 => pure #[s!"    assert same({a}) {test} same({b})"]
+  | 1 => do
+    let bound ← Gen.nat (.linear 1 30)
+    let over ← Gen.nat (.constant 0 5)
+    pure #[s!"    assert log(same(GEN ** {bound + over})) < {bound}"]
+  | 2 =>
+    -- Two stores of different words into one cell.
+    if x == y then pure #[s!"    assert same({a}) {test} same({b})"]
+    else pure #[s!"    r[GEN ** {16}] = {a}", s!"    r[GEN ** {16}] = {b}"]
+  | _ => do
+    -- A hash into a cell that already holds another word.
+    let (d0, _) := digestCells [x, y, x, y] 64
+    pure #["    wrong = StackBuf(2)", s!"    wrong[0] = {literal (d0 + 1)}",
+      s!"    keccak([{a}, {b}], [{a}, {b}], wrong)"]
 
 /-- A program: its source, and the two words it publishes. -/
 structure Program where
@@ -202,7 +291,8 @@ structure Program where
 /-- The most heap cells the branches of a program use. -/
 def branchCells : ℕ := 16
 
-def genProgram : Gen Program := do
+/-- A program; with `refused`, one whose last statement before it publishes cannot hold. -/
+def genProgramThat (refused : Bool) : Gen Program := do
   let plain ← Gen.list (.linear 1 2) (genBody 2)
   let inlined ← Gen.list (.linear 1 2) (genBody 2)
   let first ← genLiteral
@@ -210,16 +300,23 @@ def genProgram : Gen Program := do
   let count ← Gen.nat (.linear 1 14)
   let scope ← (List.range count).foldlM (fun s _ ↦
     if s.cells < branchCells then genStatement ⟨plain, inlined⟩ s else pure s) start
+  let false_ ← if refused then genFalse scope else pure #[]
   let (a, x, _) ← genName scope
   let (b, y, _) ← genName scope
   let functions (prefix_ : String) (decorator : List String) (bodies : List Body) :=
     bodies.zipIdx.flatMap fun (body, i) ↦
       decorator ++ [s!"def {prefix_}{i}(a, b):", s!"    return {body.text}", ""]
-  let lines := ["from snark_lib import *", "", "def same(a):", "    return a", ""]
+  let lines := ["from snark_lib import *", "", "def same(a):", "    return a", "",
+      "def pick(a, k: Const):", "    return a * k + k", "",
+      "@inline", "def pack64x2(a, b):", "    assert_in_k(a, b)",
+      "    return a + 18446744073709551616 * b", ""]
     ++ functions "f" [] plain ++ functions "g" ["@inline"] inlined
-    ++ ["def main():", s!"    r = HeapBuf({branchCells})"] ++ scope.lines.toList
+    ++ ["def main():", s!"    r = HeapBuf({branchCells + 1})"] ++ scope.lines.toList
+    ++ false_.toList
     ++ ["    p = GEN ** 0", s!"    p[1] = {a}", s!"    p[GEN] = {b}", "    return", ""]
   pure ⟨"\n".intercalate lines, (x, y)⟩
+
+def genProgram : Gen Program := genProgramThat false
 
 /-! ## The property -/
 
@@ -246,6 +343,20 @@ def compiles (rust : Driver) (dir : System.FilePath) : Property IO := propertyM 
     ensure (stable.startsWith "ok ") s!"the stable prover: {stable}"
     experimental === stable
 
+/-- A program with a statement that cannot hold is refused by both trees, on the words it would
+publish. -/
+def refuses (rust : Driver) (dir : System.FilePath) : Property IO := propertyM do
+  let program ← forAllWith (·.source) (genProgramThat true)
+  pure do
+    let path := (dir / "refused.py").toString
+    evalIO (IO.FS.writeFile path program.source)
+    let (x, y) := program.published
+    for tree in ["s", "x"] do
+      let outcome ← rust.ask (["exec", tree, path] ++ limbs x ++ limbs y)
+      annotate s!"tree {tree}: {outcome}"
+      ensure (outcome.startsWith "execute-error" || outcome.startsWith "panic")
+        "a statement that cannot hold was executed"
+
 end ZkdslProperty
 
 /-- The driver: the Rust binary's path may be given, and after it the number of programs. -/
@@ -253,9 +364,10 @@ def main (args : List String) : IO UInt32 := do
   let path := args.head?.getD "scripts/zkdsl-property/target/release/leanvm-zkdsl-property"
   let rust ← ZkdslProperty.Driver.start path
   let dir ← IO.FS.createTempDir
-  let property := ZkdslProperty.compiles rust dir
+  let cases (p : Property IO) : Property IO := (args[1]?.bind String.toNat?).elim p p.withTests
   let ok ← checkGroup "the zkDSL compiler and the provers on generated programs"
     [("a program publishes what the Lean field computes",
-      (args[1]?.bind String.toNat?).elim property property.withTests)]
+      cases (ZkdslProperty.compiles rust dir)),
+     ("a statement that cannot hold is refused", cases (ZkdslProperty.refuses rust dir))]
   IO.FS.removeDirAll dir
   return if ok then 0 else 1

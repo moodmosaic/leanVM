@@ -1,0 +1,20 @@
+# leanXMSS and leanSPHINCS (`crates/lean_xmss`, `crates/lean_sphincs`) on a line protocol, so that
+# `lake exe scheme-property` (cli/SchemeProperty.lean) can set their verdicts beside those of the
+# statement's schemes on generated keys, messages and altered signatures.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-scheme-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+lean_xmss = { path = "../../../../crates/lean_xmss" }
+lean_sphincs = { path = "../../../../crates/lean_sphincs" }
+
+[profile.release]
+codegen-units = 1
