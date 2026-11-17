@@ -9,6 +9,12 @@
 //!     node CHILDREN SPHINCS XMSS BLOB      aggregate the proofs CHILDREN (`0,2`, `-` for none), the
 //!                                          signatures of the two lists, and the blob (`-` for
 //!                                          none), with every covered claim as output: `ok N`
+//!     node-only CHILDREN SPHINCS XMSS BLOB S X D   the same, but with exactly the claims S, X, D
+//!                                          declared (each list as given: an order and repeats are
+//!                                          the caller's), D the blob's root or `-`: `ok N`
+//!     claims N                               proof N's claims as the API returned them, in order,
+//!                                          and whether both lists are strictly sorted as the
+//!                                          API orders claims: `s=k:m,...;x=k:m,...;sorted=B`
 //!     forged SPHINCS-CLAIM                 aggregate one leanSPHINCS signature of another message
 //!                                          than the claim's: must be an error
 //!     altered SCHEME WHAT K M POSITION BYTE   sign message M with signer K (`s` leanSPHINCS, `x`
@@ -39,6 +45,8 @@ use lean_vm::{AggregateClaims, AggregateProof, OutputClaims, aggregate, lean_da,
 struct Session {
     proofs: Vec<(AggregateClaims, AggregateProof)>,
     xmss: HashMap<u8, (lean_xmss::LeanXmssExpandedSecretKey, lean_xmss::LeanXmssPublicKey)>,
+    /// A leanSPHINCS public key's bytes to its signer number, the key's 32-byte seed.
+    sphincs_signer: HashMap<[u8; 32], u8>,
 }
 
 type Pairs = Vec<(u8, u8)>;
@@ -62,6 +70,54 @@ fn blob(s: &str) -> Result<Option<lean_da::BlobMatrix>, String> {
     let seed: u128 = s.parse().map_err(|_| "not a blob")?;
     let blob: lean_da::Blob = std::array::from_fn(|i| i as u128 ^ seed);
     Ok(Some(lean_da::BlobMatrix::build(&[blob]).map_err(|e| e.to_string())?))
+}
+
+impl Session {
+    /// `node` and `node-only` share their body: `declare` names the node's claims, `None` for
+    /// every covered one.
+    fn node(
+        &mut self,
+        children: &str,
+        sphincs: &str,
+        xmss: &str,
+        da: &str,
+        declare: Option<AggregateClaims>,
+    ) -> Result<String, String> {
+        let children: Vec<(AggregateClaims, AggregateProof)> = if children == "-" {
+            Vec::new()
+        } else {
+            children
+                .split(',')
+                .map(|n| {
+                    let n: usize = n.parse().map_err(|_| "not a proof".to_string())?;
+                    self.proofs.get(n).cloned().ok_or("no such proof".to_string())
+                })
+                .collect::<Result<_, String>>()?
+        };
+        let mut raw_sphincs = Vec::new();
+        for (k, m) in pairs(sphincs)? {
+            let public = lean_sphincs::key_gen(&[k; 32]);
+            self.sphincs_signer.insert(public.to_bytes(), k);
+            raw_sphincs.push((public, [m; 32], lean_sphincs::sign(&[k; 32], &[m; 32])));
+        }
+        let mut raw_xmss = Vec::new();
+        for (k, m) in pairs(xmss)? {
+            let (secret, public) = self.xmss_key(k);
+            raw_xmss.push((*public, [m; 32], lean_xmss::sign(secret, &[m; 32], m as u32)));
+        }
+        let matrix = blob(da)?;
+        let output = match &declare {
+            None => OutputClaims::All,
+            Some(declare) => OutputClaims::Only(declare),
+        };
+        match aggregate(&children, raw_xmss, raw_sphincs, matrix.as_ref(), output, 2) {
+            Ok(node) => {
+                self.proofs.push(node);
+                Ok(format!("ok {}", self.proofs.len() - 1))
+            }
+            Err(error) => Ok(format!("error {error:?}")),
+        }
+    }
 }
 
 impl Session {
@@ -89,35 +145,39 @@ impl Session {
 
     fn run(&mut self, line: &[&str]) -> Result<String, String> {
         Ok(match line {
-            ["node", children, sphincs, xmss, da] => {
-                let children: Vec<(AggregateClaims, AggregateProof)> = if *children == "-" {
-                    Vec::new()
-                } else {
-                    children
-                        .split(',')
-                        .map(|n| {
-                            let n: usize = n.parse().map_err(|_| "not a proof")?;
-                            self.proofs.get(n).cloned().ok_or("no such proof".to_string())
-                        })
-                        .collect::<Result<_, String>>()?
+            ["node", children, sphincs, xmss, da] => self.node(children, sphincs, xmss, da, None)?,
+            ["node-only", children, sphincs, xmss, da, d_s, d_x, d_d] => {
+                let declare = self.claims(&pairs(d_s)?, &pairs(d_x)?, d_d, false)?;
+                self.node(children, sphincs, xmss, da, Some(declare))?
+            }
+            ["claims", n] => {
+                let list = |pairs: &[(u8, u8)]| {
+                    pairs.iter().map(|&(k, m)| format!("{k}:{m}")).collect::<Vec<_>>().join(",")
                 };
-                let raw_sphincs = pairs(sphincs)?
-                    .into_iter()
-                    .map(|(k, m)| (lean_sphincs::key_gen(&[k; 32]), [m; 32], lean_sphincs::sign(&[k; 32], &[m; 32])))
+                let n: usize = n.parse().map_err(|_| "not a proof")?;
+                let (claims, _) = self.proofs.get(n).ok_or("no such proof")?;
+                // A signer's number is the seed of its key's 32 bytes; the message's is its own
+                // first one.
+                let xmss_signer: HashMap<[u8; 32], u8> = self
+                    .xmss
+                    .iter()
+                    .map(|(k, (_, public))| (public.to_bytes(), *k))
                     .collect();
-                let mut raw_xmss = Vec::new();
-                for (k, m) in pairs(xmss)? {
-                    let (secret, public) = self.xmss_key(k);
-                    raw_xmss.push((*public, [m; 32], lean_xmss::sign(secret, &[m; 32], m as u32)));
-                }
-                let matrix = blob(da)?;
-                match aggregate(&children, raw_xmss, raw_sphincs, matrix.as_ref(), OutputClaims::All, 2) {
-                    Ok(node) => {
-                        self.proofs.push(node);
-                        format!("ok {}", self.proofs.len() - 1)
-                    }
-                    Err(error) => format!("error {error:?}"),
-                }
+                let of = |map: &HashMap<[u8; 32], u8>, k: &[u8; 32]| map.get(k).copied();
+                let sphincs: Vec<(u8, u8)> = claims
+                    .lean_sphincs
+                    .iter()
+                    .map(|(k, m)| (of(&self.sphincs_signer, &k.to_bytes()).unwrap_or(u8::MAX), m[0]))
+                    .collect();
+                let xmss: Vec<(u8, u8)> = claims
+                    .lean_xmss
+                    .iter()
+                    .map(|(k, m)| (of(&xmss_signer, &k.to_bytes()).unwrap_or(u8::MAX), m[0]))
+                    .collect();
+                // The API's order, strictly: no list may repeat or run backwards.
+                let sorted = claims.lean_xmss.windows(2).all(|w| w[0] < w[1])
+                    && claims.lean_sphincs.windows(2).all(|w| w[0] < w[1]);
+                format!("s={};x={};sorted={sorted}", list(&sphincs), list(&xmss))
             }
             ["forged", claim] => {
                 let [(k, m)] = pairs(claim)?[..] else {
