@@ -1,5 +1,7 @@
 import Hedgehog
 import Statement.Field
+import Statement.Keccak
+import Statement.LeanIsa
 
 /-!
 # The zkDSL compiler and the provers on generated programs
@@ -124,6 +126,8 @@ structure Scope where
   names : Array (String × E × Bool) := #[]
   cells : ℕ := 0
   fresh : ℕ := 0
+  /-- The prover's witness streams a `hint_witness` program pops, a name's entries in pop order. -/
+  witness : List (String × List (List E)) := []
 
 def Scope.bind (s : Scope) (line : String) (value : E) (runtime : Bool) : Scope :=
   { s with lines := s.lines.push line, fresh := s.fresh + 1,
@@ -145,12 +149,30 @@ structure Helpers where
   plain : List Body
   inlined : List Body
 
+/-- The prover's witness stream as the harness takes it: a name, an entry's length, and the
+entry's limbs, the groups in the order the entries are popped, a name's groups its successive
+entries. -/
+def witnessWords (w : List (String × List (List E))) : List String :=
+  w.flatMap fun (name, entries) => entries.flatMap fun values =>
+    [name, toString values.length] ++ values.flatMap limbs
+
+/-- The thirteen input cells of a `keccak(.., cap=)` step: the four message cells, four zeros,
+and the five capacity cells, the first in cell eight, whose high limb holds no lane. -/
+def duplexCells (message capacity : List E) : List E := message ++ [0, 0, 0, 0] ++ capacity
+
+/-- The step's output cells, in the even layout: the first of them the challenge the guest reads. -/
+def duplexOut (cells : List E) : List E :=
+  let state : LeanVM.Semantics.KeccakState :=
+    LeanVM.Semantics.stateOfCells (fun c => cells.getD c.val 0) false
+  (List.finRange 13).map fun c =>
+    LeanVM.Semantics.cellsOfState (LeanVM.Semantics.keccakF1600 state) false c
+
 /-- One more statement of `main`. -/
 def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
   let v := s!"v{s.fresh}"
   let (a, x) ← genOperand s
   let (b, y) ← genOperand s
-  let kind ← Gen.nat (.constant 0 28)
+  let kind ← Gen.nat (.constant 0 34)
   match kind with
   | 0 => do
     let n ← genLiteral
@@ -355,6 +377,96 @@ def genStatement (helpers : Helpers) (s : Scope) : Gen Scope := do
       s!"    keccak([{name 0}, {name 1}], [{name 2}, {name 3}], {k}, tail={t}[0:4])"]
     let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
     pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 29 => do
+    -- A hash of two block pairs, zero-padded to whole blocks, continued from its state: 17 cells
+    -- absorbed with `final=0`, two more into the digest of 304 bytes.
+    let cells ← Gen.list (.singleton 19) (genOperand s)
+    let (n17, _) := cells.getD 17 ("0", 0)
+    let (n18, _) := cells.getD 18 ("0", 0)
+    let (d0, d1) := digestCells (cells.map (·.2)) 304
+    let (pair, st, k) := (s!"s{s.fresh}", s!"t{s.fresh}", s!"k{s.fresh}")
+    let lines := s.lines ++ #[s!"    {pair} = StackBuf(17)"]
+      ++ (cells.take 17 |>.zipIdx.map fun ((name, _), i) => s!"    {pair}[{i}] = {name}").toArray
+      ++ #[s!"    {st} = StackBuf(13)", s!"    keccak_cells({pair}, {st}, final=0)",
+        s!"    {k} = StackBuf(2)", s!"    keccak_cells([{n17}, {n18}], {k}, state={st})"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 30 => do
+    -- A hash read in place: the message's last cell and the padding's, the tail's cells past
+    -- `len` left unwritten and set to the padding by the compiler.
+    let (c, z) ← genOperand s
+    let (k0, x0) ← genOperand s
+    let (k1, x1) ← genOperand s
+    let (d0, d1) := digestCells [x, y, z, x0, x1] 80
+    let (kids, k) := (s!"k{s.fresh}", s!"h{s.fresh}")
+    let lines := s.lines ++ #[s!"    {kids} = StackBuf(5)", s!"    {kids}[0] = {k0}",
+      s!"    {kids}[1] = {k1}", s!"    {k} = StackBuf(2)",
+      s!"    keccak([{a}, {b}], [{c}, {kids}[0]], {k}, tail={kids}[1:5], len=80, pad_tail=1)"]
+    let s := { s with lines }.bind s!"    {v} = {k}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {k}[1]" d1 true)
+  | 31 => do
+    -- Two duplex steps: the transcript's capacity carried between them, the challenge each step's
+    -- first cell.
+    let (s0, w0) ← genOperand s
+    let (s1, w1) ← genOperand s
+    let (s2, w2) ← genOperand s
+    let (s3, w3) ← genOperand s
+    let (s4, w4) ← genOperand s
+    let (p0, v0) ← genOperand s
+    let (p1, v1) ← genOperand s
+    let out1 := duplexOut (duplexCells [v0, v1, 0, 0] [w0, w1, w2, w3, w4])
+    let out2 := duplexOut (duplexCells [0, 0, 0, 0] (out1.drop 8))
+    let (d0, d1) := (out1.getD 0 0, out2.getD 0 0)
+    let (seed, rate, sp, nxt) := (s!"s{s.fresh}", s!"t{s.fresh}", s!"u{s.fresh}", s!"w{s.fresh}")
+    let lines := s.lines ++ #[s!"    {seed} = [{s0}, {s1}, {s2}, {s3}, {s4}]",
+      s!"    {rate} = StackBuf(2)", s!"    {rate}[0] = {p0}", s!"    {rate}[1] = {p1}",
+      s!"    {sp} = StackBuf(13)", s!"    keccak({rate}[0:2], [0, 0], {sp}, cap={seed})",
+      s!"    {nxt} = StackBuf(13)", s!"    keccak([0, 0], [0, 0], {nxt}, cap={sp})"]
+    let s := { s with lines }.bind s!"    {v} = {sp}[0]" d0 true
+    pure (s.bind s!"    v{s.fresh} = {nxt}[0]" d1 true)
+  | 32 => do
+    -- A run of cells through a call: in through a `StackBuf` parameter, out through a `StackBuf`
+    -- return, and the product of its cells through a scalar return.
+    let (b0, x0) ← genOperand s
+    let (b1, x1) ← genOperand s
+    let (b, r) := (s!"b{s.fresh}", s!"r{s.fresh}")
+    let lines := s.lines ++ #[s!"    {b} = StackBuf(2)", s!"    {b}[0] = {b0}",
+      s!"    {b}[1] = {b1}", s!"    {r} = swap({b})"]
+    let s := { s with lines }.bind s!"    {v} = {r}[0]" x1 true
+    let s := s.bind s!"    v{s.fresh} = {r}[1]" x0 true
+    pure (s.bind s!"    v{s.fresh} = dot({b})" (x0 * x1) true)
+  | 33 => do
+    -- Prover-supplied values: two entries of a stream the program pins by asserts, a heap slice
+    -- of another, and the first stream's second entry in a fourth cell.
+    let w0 ← genLiteral
+    let w1 ← genLiteral
+    let w2 ← genLiteral
+    let w3 ← genLiteral
+    let w4 ← genLiteral
+    let w5 ← genLiteral
+    let (sb, hb, q) := (s!"h{s.fresh}", s!"q{s.fresh}", String.singleton '"')
+    let lines := s.lines ++ #[s!"    {sb} = StackBuf(2)", s!"    hint_witness({sb}, {q}r{q})",
+      s!"    assert {sb}[0] == {literal (word w0)}",
+      s!"    assert {sb}[1] == {literal (word w1)}",
+      s!"    {hb} = HeapBuf(4)", s!"    hint_witness({hb}[0:3], {q}h{q})",
+      s!"    assert {hb}[1] == {literal (word w2)}",
+      s!"    assert {hb}[GEN] == {literal (word w3)}",
+      s!"    assert {hb}[GEN ** 2] == {literal (word w4)}",
+      s!"    hint_witness({hb}[3:4], {q}r{q})",
+      s!"    assert {hb}[GEN ** 3] == {literal (word w5)}"]
+    let s := { s with lines }.bind s!"    {v} = {sb}[0]" (word w0) true
+    let s := s.bind s!"    v{s.fresh} = {hb}[GEN ** 2]" (word w4) true
+    pure { s with witness := s.witness ++
+      [("r", [[word w0, word w1], [word w5]]), ("h", [[word w2, word w3, word w4]])] }
+  | 34 => do
+    -- A function that calls itself at runtime, a g-power counting down by division: one frame
+    -- per call.
+    let count ← Gen.nat (.constant 1 6)
+    let (x0, i0) ← genOperand s
+    let (a0, m0) ← genOperand s
+    let (c0, b0) ← genOperand s
+    let value := (List.range count).foldl (fun acc _ => acc * m0 + b0) i0
+    pure (s.bind s!"    {v} = rec(GEN ** {count}, {x0}, {a0}, {c0})" value true)
   | _ => do
     -- `keccak_cells` of words named in a list, read where they lie.
     let words ← Gen.list (.linear 1 12) (genOperand s)
@@ -387,10 +499,12 @@ def genFalse (s : Scope) : Gen (Array String) := do
     pure #["    wrong = StackBuf(2)", s!"    wrong[0] = {literal (d0 + 1)}",
       s!"    keccak([{a}, {b}], [{a}, {b}], wrong)"]
 
-/-- A program: its source, and the two words it publishes. -/
+/-- A program: its source, the two words it publishes, and the witness streams its
+`hint_witness` calls pop, a name's entries in pop order. -/
 structure Program where
   source : String
   published : E × E
+  witness : List (String × List (List E)) := []
 
 /-- The most heap cells the branches of a program use. -/
 def branchCells : ℕ := 16
@@ -414,12 +528,16 @@ def genProgramThat (refused : Bool) : Gen Program := do
       "", "def same(a):", "    return a", "", "def two(a, b):", "    return a + b, a * b", "",
       "def pick(a, k: Const):", "    return a * k + k", "",
       "@inline", "def pack64x2(a, b):", "    assert_in_k(a, b)",
-      "    return a + 18446744073709551616 * b", ""]
+      "    return a + 18446744073709551616 * b", "",
+      "def swap(s: StackBuf(2)):", "    t = StackBuf(2)", "    t[0] = s[1]", "    t[1] = s[0]",
+      "    return t", "", "def dot(s: StackBuf(2)):", "    return s[0] * s[1]", "",
+      "def rec(i, acc, a, b):", "    if i == GEN ** 0:", "        return acc",
+      "    return rec(i / (GEN ** 1), acc * a + b, a, b)", ""]
     ++ functions "f" [] plain ++ functions "g" ["@inline"] inlined
     ++ ["def main():", s!"    r = HeapBuf({branchCells + 1})"] ++ scope.lines.toList
     ++ false_.toList
     ++ ["    p = GEN ** 0", s!"    p[1] = {a}", s!"    p[GEN] = {b}", "    return", ""]
-  pure ⟨"\n".intercalate lines, (x, y)⟩
+  pure ⟨"\n".intercalate lines, (x, y), scope.witness⟩
 
 def genProgram : Gen Program := genProgramThat false
 
@@ -440,24 +558,39 @@ def compiles (rust : Driver) (dir : System.FilePath) : Property IO := propertyM 
     let other := if second then limbs x ++ limbs (y + word wrong) else limbs (x + word wrong) ++ limbs y
     for tree in ["s", "x"] do
       annotate s!"tree {tree}"
-      (← rust.ask (["exec", tree, path] ++ input)) === "ok"
-      let refused ← rust.ask (["exec", tree, path] ++ other)
+      (← rust.ask (["exec", tree, path] ++ input ++ witnessWords program.witness)) === "ok"
+      let refused ← rust.ask (["exec", tree, path] ++ other ++ witnessWords program.witness)
       ensure (refused.startsWith "execute-error") s!"another public input: {refused}"
-    let stable ← rust.ask (["prove", "s", path] ++ input)
-    let experimental ← rust.ask (["prove", "x", path] ++ input)
+    -- A hinted value the prover gives wrongly is refused: the entry is the program's own.
+    match program.witness with
+    | (name, entries) :: _ =>
+      match entries with
+      | entry :: _ =>
+        match entry with
+        | value :: rest =>
+          let values := (value + word wrong) :: rest
+          let tampered := program.witness.map fun (n, es) =>
+            if n == name then (n, values :: es.tail) else (n, es)
+          let refused ← rust.ask (["exec", "s", path] ++ input ++ witnessWords tampered)
+          ensure (refused.startsWith "execute-error") s!"a wrong witness: {refused}"
+        | [] => pure ()
+      | [] => pure ()
+    | [] => pure ()
+    let stable ← rust.ask (["prove", "s", path] ++ input ++ witnessWords program.witness)
+    let experimental ← rust.ask (["prove", "x", path] ++ input ++ witnessWords program.witness)
     ensure (stable.startsWith "ok ") s!"the stable prover: {stable}"
     experimental === stable
 
 /-- A program with a statement that cannot hold is refused by both trees, on the words it would
 publish. -/
 def refuses (rust : Driver) (dir : System.FilePath) : Property IO := propertyM do
-  let program ← forAllWith (·.source) (genProgramThat true)
+  let program ← forAllWith (fun p ↦ s!"{p.source}\n# witness {repr p.witness}") (genProgramThat true)
   pure do
     let path := (dir / "refused.py").toString
     evalIO (IO.FS.writeFile path program.source)
     let (x, y) := program.published
     for tree in ["s", "x"] do
-      let outcome ← rust.ask (["exec", tree, path] ++ limbs x ++ limbs y)
+      let outcome ← rust.ask (["exec", tree, path] ++ limbs x ++ limbs y ++ witnessWords program.witness)
       annotate s!"tree {tree}: {outcome}"
       ensure (outcome.startsWith "execute-error" || outcome.startsWith "panic")
         "a statement that cannot hold was executed"
@@ -508,7 +641,9 @@ def verifiers (rust verifier : Driver) (dir : System.FilePath) : Property IO := 
     let file (name : String) : String := (dir / name).toString
     evalIO (IO.FS.writeFile (file "verified.py") program.source)
     let (x, y) := program.published
-    let exported ← rust.ask (["export", "s", file "verified.py"] ++ limbs x ++ limbs y ++ [dir.toString])
+    let exported ← rust.ask
+      (["export", "s", file "verified.py"] ++ limbs x ++ limbs y ++ [dir.toString]
+        ++ witnessWords program.witness)
     ensure (exported.startsWith "ok ") s!"the stable prover: {exported}"
     let honest := [file "bytecode.bin", file "public_input.bin", file "proof.wire"]
     (← verifier.ask honest) === "accept"

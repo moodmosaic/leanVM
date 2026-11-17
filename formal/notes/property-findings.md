@@ -119,8 +119,9 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 
 Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
-`keccak_gkr` except through whole proofs, `OutputClaims::Only`, zkDSL hints and a few constructs
-(`StackBuf` parameters and returns, recursion, `keccak_cells` with `state=` and `final=`, `keccak`
-with `cap=` and `pad_tail=`), and a prover that does not run `cpu::execute` at all. Witnesses
-changed in more than one word are now covered: `cli/GuestProperty.lean` runs a two-word check
-(2b above), and `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly`.
+`keccak_gkr` except through whole proofs, and a prover that does not run `cpu::execute` at all.
+`OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly`, witnesses changed in
+more than one word by `cli/GuestProperty.lean`'s two-word check (2b above), and the zkDSL
+constructs the generator once lacked (hints with witness streams, `StackBuf` parameters and
+returns, recursion, `keccak_cells` with `state=` and `final=0`, `keccak` with `cap=` and
+`pad_tail=`) are now kinds 29..34 of `cli/ZkdslProperty.lean`, run by `lake exe zkdsl-property`.
