@@ -97,6 +97,37 @@ same witness written otherwise, and a proof exists for the same claims either wa
   together, and a run `cpu::execute` refuses is not thereby one no trace exists for.
 - **Worth doing**: nothing required. Pinning the flag to 1 would make the witness canonical.
 
+## 3. Vector kernels and `mle_eval_par` on non-multiple-of-8 lengths (no reachable bug)
+
+- **Where**: `mle_eval_par` in both prover trees (`crates/stable_prover/.../multilinear.rs` and
+  `crates/experimental_prover/.../multilinear.rs`), and the x4/x8/f128x8 kernels behind it.
+- **What**: the mle property only generates table lengths `kept * 2 ^ min point 10`, always a
+  multiple of 8, so a non-multiple-of-8 table was untested. By hand both trees **panic** on such a
+  length: the experimental `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))` and
+  the stable `assert!(table.len().is_multiple_of(low.len()))`. A multiple-of-8 but non-power-of-two
+  row count (e.g. 3072 = 3 * 1024) evaluates the same in both trees. The kernels themselves are
+  called only on whole 4- or 8-lane groups, never a partial one: `leaf.rs` asserts a width a
+  multiple of 8, and `gkr.rs` pads a short run with `F128::ONE` (the fold's identity).
+- **Is it a bug?** No reachable one. A non-multiple-of-8 table is refused by both trees, and the
+  callers (leaf columns of `2^kappa`, ood points of at least 16 coordinates) never pass one.
+- **See it**: `printf 'mle\tx\t1\t100\t1 0 ...' | leanvm-rust-property` (13 coordinates) prints
+  `panic` for both `x` and `s`; `mle\tx\t1\t2048\t...` and `3072` print the same value.
+- **Worth doing**: nothing required; say the precondition in the stable tree's doc comment as the
+  experimental's does.
+
+## 4. `pcs` and `keccak_gkr` (no bug found beyond whole proofs)
+
+- **What**: these are only exercised through whole proofs at the guest's sizes, but the Lean
+  verifier recomputes Keccak-f and the multilinear evaluations, so a wrong `keccak_gkr` or `pcs`
+  would make a proof the verifier rejects. The whole-proof drivers (zkdsl-property, agg-property,
+  guest-property) all pass, so the sizes in use are correct. `keccak_gkr` also carries its own
+  unit tests (`crates/experimental_prover/keccak_gkr/src/tests.rs`) over many shapes and batch
+  sizes, and `gkr.rs` pads a short row run to the fold's identity rather than dropping it.
+- **Is it a bug?** No evidence. A size a whole proof never uses could still hide one, but the
+  guest's sizes are the production ones and they verify.
+- **Worth doing**: a direct differential of `keccak_gkr` against the Lean Keccak at unusual
+  depths/batches would close the gap, but it needs an exposed harness.
+
 ## What agreed, and at how many cases
 
 No disagreement but the first finding's, at these counts (2026-11-17, x86-64 with AVX-512):
@@ -120,9 +151,10 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | a signature, message or key with one byte changed, given to `aggregate` | 300 |
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 
-Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), `pcs` and
-`keccak_gkr` except through whole proofs, and a prover that does not run `cpu::execute` at all.
-`OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
+Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), a direct
+differential of `pcs`/`keccak_gkr` at unusual depths and batches, and a prover that does not run
+`cpu::execute` at all. The non-multiple-of-8 kernel lengths are probed (3 above: both trees refuse
+them). `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
 model was wrong in three places, each caught by a failing run and fixed), witnesses changed in
 more than one word by `cli/GuestProperty.lean`'s two-word check (2b above), and the zkDSL
 constructs the generator once lacked (hints with witness streams, `StackBuf` parameters and
