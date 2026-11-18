@@ -1,8 +1,8 @@
 # Findings of the property tests
 
-What the generated-input tests (lean-hedgehog) found in the Rust, with how to see each again. The
-tests are `formal/lean_vm/tests/LeanVMTests/Property/` (Lean alone) and eight drivers that run the
-Rust beside the Lean definitions, each with a Rust harness on a line protocol:
+What the generated-input tests ([lean-hedgehog](https://github.com/hedgehogqa/lean-hedgehog)) found in the Rust, with how to see each again. In short: no bug. The Rust agreed with the Lean definitions on every input but one, a panic no proof reaches (1 below), and the recursion guest refused every changed hint but the words it never reads (2 below).
+
+The tests are `formal/lean_vm/tests/LeanVMTests/Property/` (Lean alone) and eight drivers that run the Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 
 | driver | harness | what it compares |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 | `lake exe scheme-property` | `scripts/scheme-property` | leanSPHINCS and leanXMSS, the Rust against the statement's, and the leanXMSS signer's cache |
 | `lake exe da-property` | `scripts/da-property` | LeanDA's codewords, commitments and cell openings against the statement's |
 | `lake exe agg-property` | `scripts/agg-property` | the aggregation through the public API: which claims a proof verifies for, bad children, altered signatures |
-| `lake exe guest-property` | `scripts/guest-property` | the recursion guest on honest witnesses with one hint word changed |
+| `lake exe guest-property` | `scripts/guest-property` | the recursion guest on honest witnesses with one hint word changed, or two |
 | `lake exe kernel-property` | `scripts/kernel-property` | the vector kernels: the experimental `x8` and `f128x8`, the bit folds, the stable lanes, the word products, the byte operations |
 
 To build and run one, from `formal/lean_vm`:
@@ -24,19 +24,13 @@ lake exe rust-property                                   # 100 cases of each che
 lake exe rust-property scripts/rust-property/target/release/leanvm-rust-property 3000
 ```
 
-A failing check prints the smallest input found, what each side answered, and a line
-`recheck SIZE ⟨A, B⟩`: the size and seed of that one case. Every run draws a fresh seed, so a
-finding below gives the check to run and the input to expect, not a seed.
+Each driver's docstring gives its own commands. A failing check prints the smallest input found, what each side answered, and a line `recheck SIZE ⟨A, B⟩`: the size and seed of that one case. Every run draws a fresh seed, so a finding below gives the check to run and the input to expect, not a seed.
 
 ## 1. `mle_eval_par` of the experimental tree panics below three variables (not reachable)
 
-- **Where**: `crates/experimental_prover/primitives/src/multilinear.rs`, `mle_eval_par`:
-  `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))`.
-- **What**: on a table shorter than `2^n` at a point of `n < 3` coordinates it panics. The stable
-  tree's `mle_eval_par` returns the value (zero for the empty table), and both doc comments say only
-  that a shorter table "is zero past its end, which must be a whole number of rows".
-- **See it**: `lake exe rust-property`; the check "mle_eval_par of an empty table of fewer than
-  three variables" fails on its first case, shrunk to the empty point:
+- **Where**: `crates/experimental_prover/primitives/src/multilinear.rs`, `mle_eval_par`: `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))`.
+- **What**: on a table shorter than `2^n` at a point of `n < 3` coordinates it panics. The stable tree's `mle_eval_par` returns the value (zero for the empty table), and both doc comments say only that a shorter table "is zero past its end, which must be a whole number of rows".
+- **See it**: `lake exe rust-property`; the check "mle_eval_par of an empty table of fewer than three variables" fails on its first case, shrunk to the empty point:
 
   ```
   ✗ mle_eval_par of an empty table of fewer than three variables failed after 1 test and 1 shrink.
@@ -48,90 +42,51 @@ finding below gives the check to run and the input to expect, not a seed.
         rhs: "0 0"
   ```
 
-  or by hand: `printf 'mle\tx\t0\t0\n' | scripts/rust-property/target/release/leanvm-rust-property`
-  (the stable tree, `mle\ts\t0\t0`, prints `0 0`).
-- **Is it a bug in a proof?** No, as far as reading shows. The three callers in the experimental
-  tree never pass such a table: `lean_vm_core/src/leaf.rs` (two calls) passes columns of exactly
-  `2^kappa` words, which take the early return to `mle_eval`, and `pcs/src/ood.rs` passes a point of
-  at least 16 coordinates. The smallest programs (one instruction, two memory cells, every table
-  empty) prove and verify on the experimental prover.
-- **Worth doing**: say the precondition in the doc comment, or make the two trees agree. Low
-  priority.
+  or by hand: `printf 'mle\tx\t0\t0\n' | scripts/rust-property/target/release/leanvm-rust-property` (the stable tree, `mle\ts\t0\t0`, prints `0 0`).
+- **Is it a bug in a proof?** No, as far as reading shows. The three callers in the experimental tree never pass such a table: `lean_vm_core/src/leaf.rs` (two calls) passes columns of exactly `2^kappa` words, which take the early return to `mle_eval`, and `pcs/src/ood.rs` passes a point of at least 16 coordinates. The smallest programs (one instruction, two memory cells, every table empty) prove and verify on the experimental prover.
+- **Worth doing**: say the precondition in the doc comment, or make the two trees agree. Low priority.
 
 ## 2. Hint words the guest never reads, and a flag read only as zero or not (no bug found)
 
-### 2b. Two words changed at once (no bug found)
-
-- **Where**: the recursion guest (`guests/lean_ethereum.py`), hints of a node with children.
-- **What**: changing two words of two hints at once, the guest accepts the pair only when each word
-alone is free; a read word stays read, and two free words stay free. `cli/GuestProperty.lean` now
-runs a `two words changed together` check (a `change2` line in `scripts/guest-property`, two words
-set at once): a pair the guest accepts while one word alone is refused would be a tampering check a
-second change bypasses, and that never happened (read words stay read, whatever the other change).
-The honest witness's free words are independent, not constrained only together.
-- **See it**: `lake exe guest-property`; the new check runs beside the one-word one, 1000 cases a
-kind and passing. By hand, `capture parent`, then `change2 0 0 0 16 1 0 1 0 0 1` (a no-op `meta`
-word plus a free `merkle_caps` word) answers `accepted`, and `change2 15 0 0 15 0 2 1 0 1 0` (a read
-`merkle_children` word plus a free one) `refused`.
-- **Is it a bug?** No. The guest's refusal is per-word and not bypassed by a second change, and two
-free words together stay free (no pair constrained only together was found). A free word is the
-same witness written otherwise, and a proof exists for the same claims either way.
-- **Worth doing**: nothing required.
-
 - **Where**: `guests/lean_ethereum.py`, the hints of a node with children.
-- **What**: with one word of one hint changed, the guest refuses, except in words it never reads,
-  where it accepts any value: the tail of `stream` past a child's proof; the half of each
-  `merkle_children` pair on the path's own side (`walk_window` hashes the running node with the
-  other half); the `merkle_caps` nodes under a node `merkle_cap_active` leaves inactive, and node
-  0's two words; flags 0 and 1 of `merkle_cap_active`; and the pull side's slots of
-  `block_group_order` ("pull's slots go unread"). And an active cap node's flag may be any nonzero
-  `K` word, since it is only compared with zero.
-- **See it**: `lake exe guest-property`; `cli/GuestProperty.lean` states each of these as the rule
-  it checks in place of refusal, so the run passes, and any other accepted word fails it. By hand,
-  after `capture parent`, `flip 17 0 2 1` (a flag from 1 to 3) answers `accepted` and `flip 17 0 2 0`
-  (to 0) `refused`; the stream numbers are the order `capture` prints.
-- **Is it a bug?** Not that reading shows. An unread word constrains nothing because nothing
-  depends on it, and a nonzero flag is the same witness written otherwise: a proof exists for the
-  same claims either way. In the signature and blob nodes no changed word is accepted at all
-  (4,000 changes of each kind, and before that every word of the leanSPHINCS and leanXMSS nodes'
-  hints, fourteen changes each). One word at a time does not find two hints that are free only
-  together, and a run `cpu::execute` refuses is not thereby one no trace exists for.
+- **What**: with one word of one hint changed, the guest refuses, except in words it never reads, where it accepts any value:
+  - the tail of `stream` past a child's proof;
+  - the half of each `merkle_children` pair on the path's own side (`walk_window` hashes the running node with the other half);
+  - the `merkle_caps` nodes under a node `merkle_cap_active` leaves inactive, and node 0's two words;
+  - flags 0 and 1 of `merkle_cap_active`;
+  - the pull side's slots of `block_group_order` ("pull's slots go unread").
+
+  And an active cap node's flag may be any nonzero `K` word, since it is only compared with zero.
+- **See it**: `lake exe guest-property`; `cli/GuestProperty.lean` states each of these as the rule it checks in place of refusal, so the run passes, and any other accepted word fails it. By hand, after `capture parent`, `flip 17 0 2 1` (a flag from 1 to 3) answers `accepted` and `flip 17 0 2 0` (to 0) `refused`; the stream numbers are the order `capture` prints.
+- **Is it a bug?** Not that reading shows. An unread word constrains nothing because nothing depends on it, and a nonzero flag is the same witness written otherwise: a proof exists for the same claims either way. In the signature and blob nodes no changed word is accepted at all.
+- **Already known**: the `fuzzing` branch's `guest-forge` target found the same cells. Its `crates/fuzz/suppressions.txt` lists `block_group_order`, `merkle_children`, `merkle_cap_active` and `merkle_caps` for the same reasons, and it leaves a child stream's padding alone as documented unread. It also lists `child_mono` and `da_pick`, which this driver's nodes never exercise. The two tools were written apart and agree.
 - **Worth doing**: nothing required. Pinning the flag to 1 would make the witness canonical.
+
+### Two words changed at once (no bug found)
+
+- **What**: one word at a time does not find two hints that are free only together. So a second check changes two words of two hints at once (a `change2` line in `scripts/guest-property`) and requires that the guest accept the pair only when each word alone is free. A pair accepted while one of its words alone is refused would be a check a second change bypasses. That never happened: a read word stays read whatever the other change, and two free words stay free.
+- **See it**: `lake exe guest-property`; the check "two words changed together" runs beside the one-word one. By hand, after `capture parent`, `change2 0 0 0 16 1 0 1 0 0 1` (a no-op `meta` word and a free `merkle_caps` word) answers `accepted`, and `change2 15 0 0 15 0 2 1 0 1 0` (a read `merkle_children` word and a free one) `refused`.
+- **Is it a bug?** No.
+
+Neither check is a proof: a run `cpu::execute` refuses is not thereby one no trace exists for, and the guest is reached only with witnesses derived from honest ones.
 
 ## 3. Vector kernels and `mle_eval_par` on non-multiple-of-8 lengths (no reachable bug)
 
-- **Where**: `mle_eval_par` in both prover trees (`crates/stable_prover/.../multilinear.rs` and
-  `crates/experimental_prover/.../multilinear.rs`), and the x4/x8/f128x8 kernels behind it.
-- **What**: the mle property only generates table lengths `kept * 2 ^ min point 10`, always a
-  multiple of 8, so a non-multiple-of-8 table was untested. By hand both trees **panic** on such a
-  length: the experimental `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))` and
-  the stable `assert!(table.len().is_multiple_of(low.len()))`. A multiple-of-8 but non-power-of-two
-  row count (e.g. 3072 = 3 * 1024) evaluates the same in both trees. The kernels themselves are
-  called only on whole 4- or 8-lane groups, never a partial one: `leaf.rs` asserts a width a
-  multiple of 8, and `gkr.rs` pads a short run with `F128::ONE` (the fold's identity).
-- **Is it a bug?** No reachable one. A non-multiple-of-8 table is refused by both trees, and the
-  callers (leaf columns of `2^kappa`, ood points of at least 16 coordinates) never pass one.
-- **See it**: `printf 'mle\tx\t1\t100\t1 0 ...' | leanvm-rust-property` (13 coordinates) prints
-  `panic` for both `x` and `s`; `mle\tx\t1\t2048\t...` and `3072` print the same value.
-- **Worth doing**: nothing required; say the precondition in the stable tree's doc comment as the
-  experimental's does.
+- **Where**: `mle_eval_par` in both prover trees (`crates/stable_prover/.../multilinear.rs` and `crates/experimental_prover/.../multilinear.rs`), and the x4, x8 and f128x8 kernels behind it.
+- **What**: the mle property only generates table lengths `kept * 2 ^ min point 10`, always a multiple of 8, so a non-multiple-of-8 table was untested. By hand both trees panic on such a length: the experimental `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))` and the stable `assert!(table.len().is_multiple_of(low.len()))`. A multiple-of-8 but non-power-of-two row count (3072 = 3 * 1024, say) evaluates the same in both trees. The kernels themselves are called only on whole 4- or 8-lane groups, never a partial one: `leaf.rs` asserts a width a multiple of 8, and `gkr.rs` pads a short run with `F128::ONE` (the fold's identity).
+- **See it**: `printf 'mle\tx\t1\t100\t1 0 ...' | leanvm-rust-property` (13 coordinates) prints `panic` for both `x` and `s`; `mle\tx\t1\t2048\t...` and `3072` print the same value.
+- **Is it a bug?** No reachable one. A non-multiple-of-8 table is refused by both trees, and the callers (leaf columns of `2^kappa`, ood points of at least 16 coordinates) never pass one.
+- **Worth doing**: nothing required; say the precondition in the stable tree's doc comment as the experimental's does.
 
 ## 4. `pcs` and `keccak_gkr` (no bug found beyond whole proofs)
 
-- **What**: these are only exercised through whole proofs at the guest's sizes, but the Lean
-  verifier recomputes Keccak-f and the multilinear evaluations, so a wrong `keccak_gkr` or `pcs`
-  would make a proof the verifier rejects. The whole-proof drivers (zkdsl-property, agg-property,
-  guest-property) all pass, so the sizes in use are correct. `keccak_gkr` also carries its own
-  unit tests (`crates/experimental_prover/keccak_gkr/src/tests.rs`) over many shapes and batch
-  sizes, and `gkr.rs` pads a short row run to the fold's identity rather than dropping it.
-- **Is it a bug?** No evidence. A size a whole proof never uses could still hide one, but the
-  guest's sizes are the production ones and they verify.
-- **Worth doing**: a direct differential of `keccak_gkr` against the Lean Keccak at unusual
-  depths/batches would close the gap, but it needs an exposed harness.
+- **What**: these are only exercised through whole proofs at the guest's sizes, but the Lean verifier recomputes Keccak-f and the multilinear evaluations, so a wrong `keccak_gkr` or `pcs` would make a proof the verifier rejects. The whole-proof drivers (`zkdsl-property`, `agg-property`, `guest-property`) all pass, so the sizes in use are correct. `keccak_gkr` also carries its own unit tests (`crates/experimental_prover/keccak_gkr/src/tests.rs`) over many shapes and batch sizes.
+- **Is it a bug?** No evidence. A size a whole proof never uses could still hide one, but the guest's sizes are the production ones and they verify.
+- **Worth doing**: a direct differential of `keccak_gkr` against the Lean Keccak at unusual depths and batches would close the gap, but it needs an exposed harness.
 
 ## What agreed, and at how many cases
 
-No disagreement but the first finding's, at these counts (2026-11-17, x86-64 with AVX-512):
+No disagreement but the first finding's, at these counts (2026-11-17 and 2026-11-18, x86-64 with AVX-512):
 
 | check | cases |
 | --- | --- |
@@ -140,6 +95,7 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | `eq_eval`, `eq_table`, `poly_eval`, `mle_eval`, `mle_eval_par`, powers, indices, `fold`, `dot` | 3,000 each |
 | Keccak-f[1600] one and many states, Keccak-256 at once and batched | 3,000 each |
 | streamed `Hasher`, prover's `FiatShamirState` with grind (state machines) | 3,000 sequences each |
+| the vector kernels: `x8`, `f128x8`, the bit folds, the stable lanes, the word products, the byte operations | 1,000 each |
 | leanSPHINCS: signs what verifies; verdicts on altered inputs | 300 each |
 | leanXMSS: verdicts on altered inputs; the signer over 12 bottom trees | 300; 31 sequences |
 | LeanDA: codewords, commitments, openings altered or not | 20; 6; 20 |
@@ -152,22 +108,17 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | a signature, message or key with one byte changed, given to `aggregate` | 300 |
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 | the guest on two words changed at once, five kinds of node | 1,000 each |
-| the vector kernels: `x8`, `f128x8`, the bit folds, the stable lanes, the word products, the byte operations | 1,000 each |
 
-Not covered: a direct differential of `pcs`/`keccak_gkr` at unusual depths and batches (4 above),
-the experimental `x4` arm, which this machine does not compile (it needs AVX2 without AVX-512),
-and a prover that does not run `cpu::execute` at all. The vector kernels are now covered by
-`lake exe kernel-property` against the Lean definitions on this machine's arms (the AVX-512 `x8`
-and `f128x8`, the GFNI bit folds, the stable lanes, the word products, the byte operations);
-the non-multiple-of-8 lengths are probed (3 above: both trees refuse them). The first draft's
-oracles were wrong in five places, each caught by a failing run and fixed: the interleave's
-second half, the bit fold's byte index, a shift that wraps at 64, the bit transpose's byte order,
-and a `bcols` line that sent short rows to a full-block fold. `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
-model was wrong in three places, each caught by a failing run and fixed), witnesses changed in
-more than one word by `cli/GuestProperty.lean`'s two-word check (2b above), and the zkDSL
-constructs the generator once lacked (hints with witness streams, `StackBuf` parameters and
-returns, recursion, `keccak_cells` with `state=` and `final=0`, `keccak` with `cap=` and
-`pad_tail=`) are now kinds 29..34 of `cli/ZkdslProperty.lean`, run by `lake exe zkdsl-property`.
-The harness's `exec`, `prove` and `export` lines take the prover's witness stream beside the
-public input: a name, an entry's length and its limbs, the groups in pop order, a name's groups
-its successive entries; a hinted value the program pins and the prover gives wrongly is refused.
+## What is not covered
+
+- A direct differential of `pcs` and `keccak_gkr` at unusual depths and batches (4 above).
+- The experimental `x4` arm: it needs AVX2 without AVX-512, and the machine these ran on compiles the AVX-512 arms. `kernel-property`'s first check pins the arms it tested, so a run on another CPU says so.
+- A malicious prover. The drivers alter proofs, signatures and hints that an honest run produced; they do not forge transcript messages, edit the committed witness, or build a prover that skips `cpu::execute`. The `fuzzing` branch does.
+- A bytecode table that encodes no program: the drivers reach the verifiers only with programs the compiler made.
+
+## What the drivers got wrong first
+
+A failing run is usually the test. Each of these was a bug in a driver's first draft, caught by its own failing run and fixed before anything was reported:
+
+- `kernel-property`'s oracles, in five places: the interleave's second half, the bit fold's byte index, a shift that wraps at 64 in Lean and not in the hardware, the bit transpose's byte order, and a line that sent short rows to a full-block fold.
+- `agg-property`'s model of `OutputClaims::Only`, in three places.
