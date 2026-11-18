@@ -1,0 +1,22 @@
+# leanVM's vector kernels on a line protocol, so that `lake exe kernel-property`
+# (cli/KernelProperty.lean) can set their results beside the Lean definitions' on generated
+# inputs: the experimental tree's eight-lane products in both layouts and its bit folds, and
+# the stable tree's lanes, carry-less word products and byte operations, as compiled for this
+# machine's CPU.
+#
+# leanVM is this repository (`../../../..`), as for `wire-diff`; `Cargo.lock` is its.
+[package]
+name = "leanvm-kernel-property"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, not a member of leanVM's, whose members still inherit that one's settings.
+[workspace]
+
+[dependencies]
+stable_primitives = { path = "../../../../crates/stable_prover/primitives" }
+experimental_primitives = { path = "../../../../crates/experimental_prover/primitives" }
+
+[profile.release]
+codegen-units = 1

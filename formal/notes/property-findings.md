@@ -1,7 +1,7 @@
 # Findings of the property tests
 
 What the generated-input tests (lean-hedgehog) found in the Rust, with how to see each again. The
-tests are `formal/lean_vm/tests/LeanVMTests/Property/` (Lean alone) and three drivers that run the
+tests are `formal/lean_vm/tests/LeanVMTests/Property/` (Lean alone) and eight drivers that run the
 Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 
 | driver | harness | what it compares |
@@ -13,6 +13,7 @@ Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 | `lake exe da-property` | `scripts/da-property` | LeanDA's codewords, commitments and cell openings against the statement's |
 | `lake exe agg-property` | `scripts/agg-property` | the aggregation through the public API: which claims a proof verifies for, bad children, altered signatures |
 | `lake exe guest-property` | `scripts/guest-property` | the recursion guest on honest witnesses with one hint word changed |
+| `lake exe kernel-property` | `scripts/kernel-property` | the vector kernels: the experimental `x8` and `f128x8`, the bit folds, the stable lanes, the word products, the byte operations |
 
 To build and run one, from `formal/lean_vm` (lean-hedgehog beside leanVM, see `lakefile.toml`):
 
@@ -151,11 +152,17 @@ No disagreement but the first finding's, at these counts (2026-11-17, x86-64 wit
 | a signature, message or key with one byte changed, given to `aggregate` | 300 |
 | the guest on a witness with one hint word changed, five kinds of node | 4,000 each |
 | the guest on two words changed at once, five kinds of node | 1,000 each |
+| the vector kernels: `x8`, `f128x8`, the bit folds, the stable lanes, the word products, the byte operations | 1,000 each |
 
-Not covered: the vector kernels by themselves (`lanes`, `f128x8`, `x4`, `x8`, `bit_fold`), a direct
-differential of `pcs`/`keccak_gkr` at unusual depths and batches, and a prover that does not run
-`cpu::execute` at all. The non-multiple-of-8 kernel lengths are probed (3 above: both trees refuse
-them). `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
+Not covered: a direct differential of `pcs`/`keccak_gkr` at unusual depths and batches (4 above),
+the experimental `x4` arm, which this machine does not compile (it needs AVX2 without AVX-512),
+and a prover that does not run `cpu::execute` at all. The vector kernels are now covered by
+`lake exe kernel-property` against the Lean definitions on this machine's arms (the AVX-512 `x8`
+and `f128x8`, the GFNI bit folds, the stable lanes, the word products, the byte operations);
+the non-multiple-of-8 lengths are probed (3 above: both trees refuse them). The first draft's
+oracles were wrong in five places, each caught by a failing run and fixed: the interleave's
+second half, the bit fold's byte index, a shift that wraps at 64, the bit transpose's byte order,
+and a `bcols` line that sent short rows to a full-block fold. `OutputClaims::Only` is covered by `cli/AggProperty.lean`'s `AggregateOnly` (the first draft's
 model was wrong in three places, each caught by a failing run and fixed), witnesses changed in
 more than one word by `cli/GuestProperty.lean`'s two-word check (2b above), and the zkDSL
 constructs the generator once lacked (hints with witness streams, `StackBuf` parameters and

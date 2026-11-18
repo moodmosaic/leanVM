@@ -215,6 +215,15 @@ name = "guest-property"
 root = "GuestProperty"
 srcDir = "cli"
 
+# The vector kernels (the experimental x8 and f128x8, the bit folds, the stable lanes, the word
+# products, the byte operations) against the Lean definitions on generated inputs
+# (cli/KernelProperty.lean): run after the cargo build of scripts/kernel-property; not a default
+# target.
+[[lean_exe]]
+name = "kernel-property"
+root = "KernelProperty"
+srcDir = "cli"
+
 # The tests' runs too slow for the interpreter, compiled (cli/TestRuns.lean, `LeanVMTests/Runs.lean`):
 # check-all runs it, under `lake env` (it reads the guest's core data from its `.olean`), after
 # `lake test`.
