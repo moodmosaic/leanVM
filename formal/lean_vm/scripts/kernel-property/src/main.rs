@@ -270,10 +270,8 @@ fn x8ie(rest: &[String]) -> [XE; 16] {
     let a = e8(rest, &mut i, XE::new).unwrap();
     let b = e8(rest, &mut i, XE::new).unwrap();
     expect_end(rest, &mut i).unwrap();
-    let (x, y) = xf::F128x8::interleave(xf::F128x8::load(&a), xf::F128x8::load(&b));
     let mut out = [XE::ZERO; 16];
-    out[..8].copy_from_slice(&x.to_array());
-    out[8..].copy_from_slice(&y.to_array());
+    xf::F128x8::store_interleaved(xf::F128x8::load(&a), xf::F128x8::load(&b), &mut out);
     out
 }
 
@@ -282,7 +280,7 @@ fn x8de(rest: &[String]) -> [XE; 16] {
     let a = e8(rest, &mut i, XE::new).unwrap();
     let b = e8(rest, &mut i, XE::new).unwrap();
     expect_end(rest, &mut i).unwrap();
-    let (x, y) = xf::F128x8::deinterleave(xf::F128x8::load(&a), xf::F128x8::load(&b));
+    let (x, y) = xf::F128x8::even_odd(xf::F128x8::load(&a), xf::F128x8::load(&b));
     let mut out = [XE::ZERO; 16];
     out[..8].copy_from_slice(&x.to_array());
     out[8..].copy_from_slice(&y.to_array());
