@@ -15,7 +15,7 @@ Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 | `lake exe guest-property` | `scripts/guest-property` | the recursion guest on honest witnesses with one hint word changed |
 | `lake exe kernel-property` | `scripts/kernel-property` | the vector kernels: the experimental `x8` and `f128x8`, the bit folds, the stable lanes, the word products, the byte operations |
 
-To build and run one, from `formal/lean_vm` (lean-hedgehog beside leanVM, see `lakefile.toml`):
+To build and run one, from `formal/lean_vm`:
 
 ```sh
 cargo build --release --manifest-path scripts/rust-property/Cargo.toml

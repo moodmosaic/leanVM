@@ -75,11 +75,11 @@ name = "PolyFun"
 git = "https://github.com/Verified-zkEVM/PolyFun"
 rev = "528b3b1fda285487e55704409bd1b058dc18fcad"
 
-# Property-based tests (tests/LeanVMTests/Property/). A path while lean-hedgehog is private; to
-# become its git URL and a revision once it is public.
+# Property-based tests (tests/LeanVMTests/Property/): lean-hedgehog v0.1.0.
 [[require]]
 name = "hedgehog"
-path = "../../../../hedgehogqa/lean-hedgehog"
+git = "https://github.com/hedgehogqa/lean-hedgehog"
+rev = "86deed911bcbc16b70e429bfaa8774317b0567ee"
 
 [[lean_lib]]
 name = "LeanVM"
