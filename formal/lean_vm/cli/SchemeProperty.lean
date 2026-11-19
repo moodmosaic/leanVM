@@ -208,7 +208,7 @@ def xmssSigner (rust : Driver) (key : String) :
     (3, .sign <$> Gen.list (.singleton 32) (Gen.nat (.constant 0 3)) <*> genLeaf)]
   apply _ _ := ()
   initSut _ := pure []
-  applySut signed _
+  applySut signed _ _
     | .prepare leaf => do
       (← rust.ask ["xprepare", toString leaf]) === "ok"
       pure signed

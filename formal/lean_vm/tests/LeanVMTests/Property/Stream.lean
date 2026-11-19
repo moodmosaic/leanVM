@@ -45,7 +45,7 @@ structure Count where
   value : ℕ
 
 instance : Command Count Written Unit Id where
-  apply c := put LeanVM.Prover.u32Bytes (readLE 4) id c.value
+  apply _ c := put LeanVM.Prover.u32Bytes (readLE 4) id c.value
   label c := s!"COUNT({c.value})"
   build _ := Count.mk <$> Gen.nat (.exponential 0 (2 ^ 32 - 1))
 
@@ -54,7 +54,7 @@ structure Word where
   value : K
 
 instance : Command Word Written Unit Id where
-  apply c := put K.toBytes readK id c.value
+  apply _ c := put K.toBytes readK id c.value
   label c := s!"WORD({c.value.lane})"
   build _ := Word.mk <$> genK
 
@@ -63,7 +63,7 @@ structure Hash where
   value : Digest
 
 instance : Command Hash Written Unit Id where
-  apply c := put digestBytes readDigest id c.value
+  apply _ c := put digestBytes readDigest id c.value
   label c := s!"DIGEST({c.value.toList})"
   build _ := Hash.mk <$> genDigest
 
@@ -72,7 +72,7 @@ structure Words where
   values : List K
 
 instance : Command Words Written Unit Id where
-  apply c := put (fun ws ↦ LeanVM.Prover.u32Bytes ws.length ++ ws.flatMap K.toBytes)
+  apply _ c := put (fun ws ↦ LeanVM.Prover.u32Bytes ws.length ++ ws.flatMap K.toBytes)
     (readCounted readK) id c.values
   label c := s!"WORDS({c.values.map (·.lane)})"
   build _ := Words.mk <$> Gen.list (.linear 0 5) genK
@@ -82,7 +82,7 @@ structure Phases where
   openings : List (List Opening)
 
 instance : Command Phases Written Unit Id where
-  apply c := put phasesBytes readPhases view c.openings
+  apply _ c := put phasesBytes readPhases view c.openings
   label c := s!"PHASES({reprStr (view c.openings)})"
   build _ := Phases.mk <$> genPhases
 

@@ -309,7 +309,7 @@ def hasher (rust : Driver) : StateMachine (List UInt8) Hashing Unit IO where
     rust.stdin.putStrLn "hnew"
     rust.stdin.flush
     let _ ← rust.stdout.getLine
-  applySut _ absorbed
+  applySut _ _ absorbed
     | .update bytes => do (← rust.ask ["hupdate", hex bytes]) === "ok"
     | .finish => do (← rust.ask ["hfinal"]) === hex (digestBytes (keccak256 absorbed))
 
@@ -364,7 +364,7 @@ def sponge (rust : Driver) : StateMachine Seeded Asking Sponge IO where
     let _ ← rust.stdout.getLine
     let digest (ws : List UInt64) : Digest := Vector.ofFn fun i : Fin 4 ↦ ws.getD i.val 0
     pure ⟨keccakF1600 (seedInput (digest s.iv) (digest s.publicInput)), [], none⟩
-  applySut model _
+  applySut model _ _
     | .observe c0 c1 => do
       (← rust.ask ["sobserve", lane c0, lane c1]) === "ok"
       pure (absorb keccak model (E.ofLimbs (K.ofLane c0) (K.ofLane c1)) dsObserve)

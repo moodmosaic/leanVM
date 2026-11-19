@@ -71,7 +71,7 @@ def machine : StateMachine Queue Operation Run Id where
     | .grind _ =>
       { q.absorb with waiting := 0, permutations := q.absorb.permutations + 1, ground := true }
   initSut _ := pure (⟨Vector.replicate 25 0, [], none⟩, 0)
-  applySut run _
+  applySut run _ _
     | .absorb x => pure ((absorb countingPermutation run.1 x dsObserve).run run.2)
     | .squeeze => do
       let ((challenge, sponge), calls) := (squeeze countingPermutation run.1).run run.2

@@ -75,11 +75,11 @@ name = "PolyFun"
 git = "https://github.com/Verified-zkEVM/PolyFun"
 rev = "528b3b1fda285487e55704409bd1b058dc18fcad"
 
-# Property-based tests (tests/LeanVMTests/Property/): lean-hedgehog v0.2.0.
+# Property-based tests (tests/LeanVMTests/Property/): lean-hedgehog v0.3.0.
 [[require]]
 name = "hedgehog"
 git = "https://github.com/hedgehogqa/lean-hedgehog"
-rev = "63b5f983e60faf5700932b16e895f9c2f4819991"
+rev = "c02708fbdb383f29a2f943bba1e494f05777bc4f"
 
 [[lean_lib]]
 name = "LeanVM"

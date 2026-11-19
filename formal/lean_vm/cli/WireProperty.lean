@@ -149,7 +149,7 @@ structure Honest where
   proof : Proof
 
 instance : Command Honest Session Context IO where
-  apply c _ := do
+  apply _ c _ := do
     let bytes := c.proof.toBytes
     agree c.ctx bytes
     -- An honest proof decodes to itself (`LeanVM.Wire.roundTrip`, here on the compiled code).
@@ -165,8 +165,8 @@ structure Flip where
   bit : ℕ
 
 instance : Command Flip Session Context IO where
-  check _ s := !s.bytes.isEmpty
-  apply c s := do
+  check _ _ s := !s.bytes.isEmpty
+  apply _ c s := do
     let i := c.position % s.bytes.length
     let bytes := s.bytes.set i (s.bytes.getD i 0 ^^^ (1 <<< UInt8.ofNat c.bit))
     agree c.ctx bytes
@@ -180,8 +180,8 @@ structure Cut where
   kept : ℕ
 
 instance : Command Cut Session Context IO where
-  check _ s := !s.bytes.isEmpty
-  apply c s := do
+  check _ _ s := !s.bytes.isEmpty
+  apply _ c s := do
     let bytes := s.bytes.take (c.kept % s.bytes.length)
     agree c.ctx bytes
     pure ⟨bytes⟩
@@ -194,7 +194,7 @@ structure Append where
   extra : List UInt8
 
 instance : Command Append Session Context IO where
-  apply c s := do
+  apply _ c s := do
     let bytes := s.bytes ++ c.extra
     agree c.ctx bytes
     pure ⟨bytes⟩
@@ -208,8 +208,8 @@ structure Overwrite where
   word : ℕ
 
 instance : Command Overwrite Session Context IO where
-  check _ s := s.bytes.length ≥ 4
-  apply c s := do
+  check _ _ s := s.bytes.length ≥ 4
+  apply _ c s := do
     let i := c.position % (s.bytes.length - 3)
     let bytes := s.bytes.take i ++ LeanVM.Prover.u32Bytes c.word ++ s.bytes.drop (i + 4)
     agree c.ctx bytes
@@ -223,8 +223,8 @@ structure Reencode where
   ctx : Context
 
 instance : Command Reencode Session Context IO where
-  check _ s := (Proof.fromBytes (m := Id) permutation s.bytes).isSome
-  apply c s := do
+  check _ _ s := (Proof.fromBytes (m := Id) permutation s.bytes).isSome
+  apply _ c s := do
     let ctx := c.ctx
     match Proof.fromBytes (m := Id) permutation s.bytes with
     | none => pure s

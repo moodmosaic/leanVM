@@ -116,7 +116,7 @@ structure Aggregate where
   blob : Option Nat
 
 instance : Command Aggregate Tree Driver IO where
-  apply c tree := do
+  apply _ c tree := do
     let children := (c.children.filterMap tree.pick).eraseDups
     let answer ← c.rust.ask ["node",
       if children.isEmpty then "-" else ",".intercalate (children.map (toString ·.id)),
@@ -231,7 +231,7 @@ def parseClaims (s : String) : List Claim × List Claim × Bool :=
   (list 0, list 1, (parts[2]?.getD "") == "sorted=true")
 
 instance : Command AggregateOnly Tree Driver IO where
-  apply c tree := do
+  apply _ c tree := do
     let children := (c.children.filterMap tree.pick).eraseDups
     let (coveredS, coveredX, coveredDa) := coveredOf children c.sphincs c.xmss c.blob
     let (declS, declX, declDa, expectOk) := c.declared tree
@@ -297,8 +297,8 @@ structure VerifyOther where
   alteration : Alteration
 
 instance : Command VerifyOther Tree Driver IO where
-  check _ tree := tree.nodes.size != 0
-  apply c tree := do
+  check _ _ tree := tree.nodes.size != 0
+  apply _ c tree := do
     match tree.pick c.node with
     | none => pure tree
     | some node =>
@@ -346,8 +346,8 @@ def altered (node : Node) : Alteration → List Claim × List Claim × Option Na
       node.sphincs.isEmpty && node.xmss.isEmpty)
 
 instance : Command BadChild Tree Driver IO where
-  check _ tree := tree.nodes.size != 0
-  apply c tree := do
+  check _ _ tree := tree.nodes.size != 0
+  apply _ c tree := do
     match tree.pick c.node with
     | none => pure tree
     | some node =>
@@ -371,8 +371,8 @@ structure VerifyUnsorted where
   node : Nat
 
 instance : Command VerifyUnsorted Tree Driver IO where
-  check _ tree := tree.nodes.size != 0
-  apply c tree := do
+  check _ _ tree := tree.nodes.size != 0
+  apply _ c tree := do
     match tree.pick c.node with
     | none => pure tree
     | some node =>
@@ -393,8 +393,8 @@ structure Bytes where
   node : Nat
 
 instance : Command Bytes Tree Driver IO where
-  check _ tree := tree.nodes.size != 0
-  apply c tree := do
+  check _ _ tree := tree.nodes.size != 0
+  apply _ c tree := do
     match tree.pick c.node with
     | none => pure tree
     | some node =>
@@ -411,8 +411,8 @@ structure Tamper where
   byte : Nat
 
 instance : Command Tamper Tree Driver IO where
-  check _ tree := tree.nodes.size != 0
-  apply c tree := do
+  check _ _ tree := tree.nodes.size != 0
+  apply _ c tree := do
     match tree.pick c.node with
     | none => pure tree
     | some node =>
@@ -431,7 +431,7 @@ structure Forged where
   claim : Claim
 
 instance : Command Forged Tree Driver IO where
-  apply c tree := do
+  apply _ c tree := do
     let answer ← c.rust.ask ["forged", claims [c.claim]]
     ensure (answer.startsWith "error") s!"a forged signature was aggregated: {answer}"
     pure tree
