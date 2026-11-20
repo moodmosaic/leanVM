@@ -6,6 +6,7 @@ version = 4
 name = "aggregation"
 version = "0.1.0"
 dependencies = [
+ "claims",
  "fiat_shamir_prover",
  "isa",
  "keccak256",
@@ -18,6 +19,14 @@ dependencies = [
  "tracing",
  "verifier",
  "zkdsl_compiler",
+]
+
+[[package]]
+name = "claims"
+version = "0.1.0"
+dependencies = [
+ "lean_sphincs",
+ "lean_xmss",
 ]
 
 [[package]]

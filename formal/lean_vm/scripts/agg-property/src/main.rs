@@ -285,7 +285,7 @@ impl Session {
 fn main() {
     // Panics are reported on the result line, not on standard error.
     std::panic::set_hook(Box::new(|_| {}));
-    lean_vm::setup();
+    lean_vm::setup(0);
     let mut session = Session::default();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();

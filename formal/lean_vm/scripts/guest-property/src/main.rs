@@ -36,8 +36,14 @@ static CAPTURED: Mutex<Option<(Witness, [E; 2])>> = Mutex::new(None);
 struct Capture;
 
 impl isa::Prover for Capture {
+    const NAME: &'static str = StableProver::NAME;
+
     fn init() {
         StableProver::init();
+    }
+
+    fn set_num_threads(n: usize) {
+        StableProver::set_num_threads(n);
     }
 
     fn prove(
