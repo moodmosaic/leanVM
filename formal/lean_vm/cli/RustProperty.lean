@@ -210,10 +210,9 @@ def multilinearExtension (rust : Driver) : Property IO := propertyM do
 /-- `mle_eval_par` on an empty table of fewer than three variables: zero, as the table "is zero past
 its end".
 
-**It fails on the experimental tree**, which asserts `low_vars >= 3` there and panics, where the
-stable tree returns zero: the two trees differ outside what either documents. Whether a prover
-reaches it (a column cut to no row, at a point of fewer than three coordinates) is for the Rust's
-authors to say. -/
+It failed on the experimental tree, which asserted `low_vars >= 3` there and panicked, where the
+stable tree returned zero. The Rust's authors made the two trees agree in `b37b369ce`, so it passes
+on both. -/
 def multilinearExtensionOfAShortTable (rust : Driver) : Property IO := propertyM do
   let point ← forAllWith scalars (Gen.list (.constant 0 2) genE)
   pure do

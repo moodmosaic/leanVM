@@ -1,6 +1,6 @@
 # Findings of the property tests
 
-What the generated-input tests ([lean-hedgehog](https://github.com/hedgehogqa/lean-hedgehog)) found in the Rust, with how to see each again. In short: no bug. The Rust agreed with the Lean definitions on every input but one, a panic no proof reaches (1 below), and the recursion guest refused every changed hint but the words it never reads (2 below).
+What the generated-input tests ([lean-hedgehog](https://github.com/hedgehogqa/lean-hedgehog)) found in the Rust, with how to see each again. In short: no bug. The Rust agreed with the Lean definitions on every input but one, a panic no proof reaches (1 below, since fixed on `main`), and the recursion guest refused every changed hint but the words it never reads (2 below).
 
 The tests are `formal/lean_vm/tests/LeanVMTests/Property/` (Lean alone) and eight drivers that run the Rust beside the Lean definitions, each with a Rust harness on a line protocol:
 
@@ -26,11 +26,13 @@ lake exe rust-property scripts/rust-property/target/release/leanvm-rust-property
 
 Each driver's docstring gives its own commands. A failing check prints the smallest input found, what each side answered, and a line `recheck SIZE ⟨A, B⟩`: the size and seed of that one case. Every run draws a fresh seed, so a finding below gives the check to run and the input to expect, not a seed.
 
-## 1. `mle_eval_par` of the experimental tree panics below three variables (not reachable)
+## 1. `mle_eval_par` of the experimental tree panics below three variables (not reachable; fixed)
+
+Fixed on `main` in `b37b369ce`, "fix: experimental mle_eval_par returns zero on an empty table below three variables": the experimental tree now returns zero as the stable one does, and both trees' folding tests pin the empty table. The check passes on this branch since its rebase on that commit. What follows is the finding as it was made.
 
 - **Where**: `crates/experimental_prover/primitives/src/multilinear.rs`, `mle_eval_par`: `assert!(low_vars >= 3 && table.len().is_multiple_of(1 << low_vars))`.
 - **What**: on a table shorter than `2^n` at a point of `n < 3` coordinates it panics. The stable tree's `mle_eval_par` returns the value (zero for the empty table), and both doc comments say only that a shorter table "is zero past its end, which must be a whole number of rows".
-- **See it**: `lake exe rust-property`; the check "mle_eval_par of an empty table of fewer than three variables" fails on its first case, shrunk to the empty point:
+- **See it**: before the fix, `lake exe rust-property`; the check "mle_eval_par of an empty table of fewer than three variables" failed on its first case, shrunk to the empty point:
 
   ```
   ✗ mle_eval_par of an empty table of fewer than three variables failed after 1 test and 1 shrink.
