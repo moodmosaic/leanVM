@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.0](https://github.com/moodmosaic/leanVM/compare/bindings-v0.13.1...bindings-v0.14.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* aggregate(), setup() and Aggregate.from_bytes are replaced by Sidecar.aggregate and Sidecar.verify on a running leanvm-sidecar (Unix only); the C ABI's aggregate calls take a sidecar handle.
+* the Go module is leanvm.org/go, the Nim package is bindings/nim at tag bindings-vX.Y.Z (`?subdir=bindings/nim`), and an aggregate from 0.11.x and one from 0.12.0 reject each other.
+
+### Features
+
+* bindings: aggregate/verify through a leanVM sidecar instead of in-process ([#804](https://github.com/moodmosaic/leanVM/issues/804)) ([dbd30ec](https://github.com/moodmosaic/leanVM/commit/dbd30ec2c6f2475b4e996994f80b1ee5404ea1c2))
+* move the bindings into leanVM ([#789](https://github.com/moodmosaic/leanVM/issues/789)) ([39acb3f](https://github.com/moodmosaic/leanVM/commit/39acb3fe0c19586767075733496cb5ee6d7ce3c1))
+
+
+### Bug Fixes
+
+* add leanvm-sidecar --version ([8895fd1](https://github.com/moodmosaic/leanVM/commit/8895fd13d33acd90192f5d3ccc2f11f2332ce72e))
+
 ## [0.13.1](https://github.com/leanEthereum/leanVM/compare/bindings-v0.13.0...bindings-v0.13.1) (2026-11-20)
 
 
